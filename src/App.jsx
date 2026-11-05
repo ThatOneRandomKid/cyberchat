@@ -70,26 +70,25 @@ const ALL_COLOR_GRADIENTS = [
   'from-sky-400 to-indigo-600'
 ];
 
-// STRICT BADGE PROGRESSION: Crown is STRICTLY locked to Admin (LEO_)
+// Strictly locks Crown (👑) to Admin (LEO_).
+// Non-admin rank icons update slowly over time.
 const getRankIcon = (rank, isAdmin) => {
   if (isAdmin) return '👑';
-  if (rank >= 100) return '💎'; // Non-admin rank 100+ gets Diamond
   if (rank >= 50) return '💎';
-  if (rank >= 25) return '🚀';
+  if (rank >= 20) return '🚀';
   if (rank >= 10) return '🔥';
   if (rank >= 5) return '⚡';
   return '⭐';
 };
 
 export default function App() {
-  // User Profile States
+  // Auth & Profile State
   const [user, setUser] = useState(null);
   const [userName, setUserName] = useState(() => localStorage.getItem('hub_username') || '');
   const [userPassword, setUserPassword] = useState('');
   const [nameError, setNameError] = useState('');
   const [isAdmin, setIsAdmin] = useState(() => localStorage.getItem('hub_isadmin') === 'true');
 
-  // Random Color Gradient per User
   const [userGradient] = useState(() => {
     const saved = localStorage.getItem('hub_usergradient');
     if (saved) return saved;
@@ -100,12 +99,14 @@ export default function App() {
 
   const [isProfileSet, setIsProfileSet] = useState(() => localStorage.getItem('hub_isregistered') === 'true');
 
-  // Active seconds & rank calculation
+  // Active time tracking - HARDER RANK-UP ENGINE (300 seconds / 5 min = 1 Rank)
   const [activeSeconds, setActiveSeconds] = useState(() => {
     const saved = localStorage.getItem('hub_activeseconds');
     return saved ? parseInt(saved, 10) : 0;
   });
-  const userRank = (isAdmin ? 100 : 0) + Math.floor(activeSeconds / 60);
+  
+  // Calculate Rank (1 Rank every 300 seconds)
+  const userRank = (isAdmin ? 100 : 0) + Math.floor(activeSeconds / 300);
   const currentBadgeIcon = getRankIcon(userRank, isAdmin);
 
   // Room & Approval Control States
@@ -175,7 +176,7 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Sync Room Messages, Disco Effects, and Creator Requests
+  // Sync Messages, Disco, and Live Creator Approval Requests
   useEffect(() => {
     if (!roomId) return;
 
@@ -196,7 +197,7 @@ export default function App() {
           }
         } else if (e.newValue === 'denied') {
           setIsWaitingForApproval(false);
-          alert(`❌ Creator denied your request to join #${roomId}.`);
+          alert(`❌ Creator denied your request to enter #${roomId}.`);
         }
       }
       if (e.key === `hub_disco_sync_${roomId}`) {
@@ -217,7 +218,7 @@ export default function App() {
     return () => window.removeEventListener('storage', handleStorageEvent);
   }, [roomId, userName, sideRooms]);
 
-  // Active Rank Heartbeat Timer
+  // Harder Rank Heartbeat
   useEffect(() => {
     if (!inRoom) return;
     const timer = setInterval(() => {
@@ -264,7 +265,7 @@ export default function App() {
     setIsProfileSet(true);
 
     const targetRoom = customRoomInput.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '') || 'cyber-lobby';
-    handleJoinRoom(targetRoom);
+    handleJoinRoom(targetRoom, cleanName);
   };
 
   const handleSignOut = () => {
@@ -278,8 +279,8 @@ export default function App() {
     setUserPassword('');
   };
 
-  // Join Room with Approval Checking
-  const handleJoinRoom = (targetRoomId) => {
+  // Join Room with Login Screen Approval Logic
+  const handleJoinRoom = (targetRoomId, overrideUsername = userName) => {
     const cleaned = targetRoomId.toLowerCase().trim().replace(/[^a-z0-9_-]/g, '');
     if (!cleaned) return;
 
@@ -287,13 +288,13 @@ export default function App() {
 
     // First person to enter becomes Room Creator
     if (!currentCreators[cleaned]) {
-      currentCreators[cleaned] = userName;
+      currentCreators[cleaned] = overrideUsername;
       setRoomCreators(currentCreators);
       localStorage.setItem('hub_room_creators', JSON.stringify(currentCreators));
     }
 
     const creatorName = currentCreators[cleaned];
-    const isCreator = creatorName === userName;
+    const isCreator = creatorName === overrideUsername;
     const isAlreadyApproved = approvedRooms.includes(cleaned);
 
     if (!isCreator && !isAdmin && !isAlreadyApproved) {
@@ -301,8 +302,8 @@ export default function App() {
       setIsWaitingForApproval(true);
 
       const existingReqs = JSON.parse(localStorage.getItem(`hub_requests_sync_${cleaned}`) || '[]');
-      if (!existingReqs.some(r => r.user === userName)) {
-        const updatedReqs = [...existingReqs, { user: userName, time: new Date().toLocaleTimeString() }];
+      if (!existingReqs.some(r => r.user === overrideUsername)) {
+        const updatedReqs = [...existingReqs, { user: overrideUsername, time: new Date().toLocaleTimeString() }];
         localStorage.setItem(`hub_requests_sync_${cleaned}`, JSON.stringify(updatedReqs));
         window.dispatchEvent(new Event('storage'));
       }
@@ -338,7 +339,7 @@ export default function App() {
     }
   };
 
-  // Creator Approval Decisions
+  // Creator Approvals
   const handleApproveUser = (targetUser) => {
     const updatedReqs = joinRequests.filter(r => r.user !== targetUser);
     setJoinRequests(updatedReqs);
@@ -350,7 +351,7 @@ export default function App() {
       id: Date.now(),
       userId: 'system',
       userName: 'SYSTEM',
-      text: `✅ Creator @${userName} approved @${targetUser} into the room!`,
+      text: `✅ Creator @${userName} approved @${targetUser} into #${roomId}!`,
       createdAt: Date.now()
     };
     const updatedMsgs = [...messages, systemMsg];
@@ -462,7 +463,7 @@ export default function App() {
           </div>
           <h2 className="text-2xl font-black text-white mb-2">Waiting for Permission...</h2>
           <p className="text-sm text-slate-400 max-w-sm mb-6">
-            Room <span className="text-cyan-400 font-bold">#{roomId}</span> is private. We sent a join request to creator <span className="text-amber-400 font-bold">@{roomCreators[roomId]}</span>.
+            Room <span className="text-cyan-400 font-bold">#{roomId}</span> is private. Sent a join request to creator <span className="text-amber-400 font-bold">@{roomCreators[roomId]}</span>.
           </p>
           <button
             onClick={() => setIsWaitingForApproval(false)}
@@ -473,7 +474,7 @@ export default function App() {
         </div>
       )}
 
-      {/* LOGIN SCREEN */}
+      {/* SIGN IN & INITIAL ROOM SELECTION */}
       {!isProfileSet || (!inRoom && !isWaitingForApproval) ? (
         <div className="flex-1 flex flex-col items-center justify-center p-4 bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-950">
           <div className="w-full max-w-md bg-slate-900/90 border border-slate-800 p-8 rounded-3xl shadow-2xl backdrop-blur-xl">
@@ -534,7 +535,7 @@ export default function App() {
           </div>
         </div>
       ) : (
-        /* CHAT INTERFACE */
+        /* MAIN CHAT APPLICATION */
         <div className="flex-1 flex flex-col h-screen">
           <header className="h-16 bg-slate-900 border-b border-slate-800 px-4 flex items-center justify-between shrink-0">
             <div className="flex items-center gap-3">
@@ -617,7 +618,7 @@ export default function App() {
                 ))}
               </div>
 
-              {/* CREATOR JOIN REQUEST APPROVAL PANEL */}
+              {/* CREATOR APPROVAL PANEL */}
               {isCurrentRoomCreator && joinRequests.length > 0 && (
                 <div className="pt-3 border-t border-slate-800 bg-amber-950/20 p-2 rounded-xl border border-amber-500/30">
                   <div className="text-[10px] text-amber-400 font-bold uppercase mb-2 flex items-center gap-1">
@@ -642,7 +643,7 @@ export default function App() {
               )}
             </aside>
 
-            {/* MAIN MESSAGES FEED */}
+            {/* MESSAGES FEED */}
             <main className="flex-1 flex flex-col bg-slate-950 p-4 overflow-hidden relative">
               <div className="flex-1 overflow-y-auto space-y-4 pr-2">
                 {messages.map((m) => {
