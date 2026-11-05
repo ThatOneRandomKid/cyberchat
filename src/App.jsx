@@ -31,7 +31,8 @@ import {
   LogIn,
   Plus,
   Hash,
-  ImageIcon
+  ImageIcon,
+  Trash2
 } from 'lucide-react';
 
 // --- Firebase Config & App Initialization ---
@@ -130,12 +131,20 @@ export default function App() {
   const [customRoomInput, setCustomRoomInput] = useState('');
   const [showMobileSidebar, setShowMobileSidebar] = useState(false);
   
-  // Unique Room List (Prevents Duplicates)
-  const [sideRooms, setSideRooms] = useState(['cyber-lobby', 'vip-lounge', 'dev-vault']);
+  // Dynamic Rooms Sidebar List
+  const [sideRooms, setSideRooms] = useState(() => {
+    const saved = localStorage.getItem('hub_siderooms');
+    return saved ? JSON.parse(saved) : ['cyber-lobby', 'vip-lounge', 'dev-vault'];
+  });
   const [newSidebarRoom, setNewSidebarRoom] = useState('');
 
   const chatEndRef = useRef(null);
   const prevMessagesLength = useRef(0);
+
+  // Save side rooms to local storage whenever modified
+  useEffect(() => {
+    localStorage.setItem('hub_siderooms', JSON.stringify(sideRooms));
+  }, [sideRooms]);
 
   // Initialize Firebase Auth
   useEffect(() => {
@@ -163,7 +172,7 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Parse URL for shared room link on page load
+  // Parse URL room param
   useEffect(() => {
     try {
       const getRoomFromURL = () => {
@@ -188,7 +197,7 @@ export default function App() {
     }
   }, []);
 
-  // Active user timer heartbeat
+  // Timer Heartbeat
   useEffect(() => {
     if (!inRoom) return;
     const timer = setInterval(() => {
@@ -201,18 +210,18 @@ export default function App() {
     return () => clearInterval(timer);
   }, [inRoom]);
 
-  // Scroll chat to bottom on new messages
+  // Scroll chat
   useEffect(() => {
     if (inRoom) {
       chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [messages, inRoom]);
 
-  // Firestore Realtime Synchronization for Messages & Online Presence
+  // Realtime Global Room Listener (Top-level Collection for all users entering the same room code)
   useEffect(() => {
     if (!user || !inRoom || !roomId) return;
 
-    const userDocRef = doc(db, 'artifacts', appId, 'public', 'data', `room_${roomId}_users`, user.uid);
+    const userDocRef = doc(db, 'rooms', roomId, 'users', user.uid);
     const unsubscribeUserDoc = onSnapshot(userDocRef, (snap) => {
       if (snap.exists()) {
         const data = snap.data();
@@ -231,8 +240,8 @@ export default function App() {
       }
     });
 
-    // Realtime message listener
-    const messagesRef = collection(db, 'artifacts', appId, 'public', 'data', `room_${roomId}_messages`);
+    // Realtime shared messages listener
+    const messagesRef = collection(db, 'rooms', roomId, 'messages');
     const unsubscribeMessages = onSnapshot(
       messagesRef,
       (snapshot) => {
@@ -252,7 +261,7 @@ export default function App() {
       (error) => console.error("Firestore message sub error:", error)
     );
 
-    // Presence Sync
+    // Online Presence
     const registerPresence = async () => {
       await setDoc(userDocRef, {
         uid: user.uid,
@@ -268,7 +277,7 @@ export default function App() {
     registerPresence();
     const heartbeatInterval = setInterval(registerPresence, 15000);
 
-    const usersCollectionRef = collection(db, 'artifacts', appId, 'public', 'data', `room_${roomId}_users`);
+    const usersCollectionRef = collection(db, 'rooms', roomId, 'users');
     const unsubscribeUsers = onSnapshot(
       usersCollectionRef,
       (snapshot) => {
@@ -336,7 +345,7 @@ export default function App() {
     setUserPassword('');
   };
 
-  // Switch/Join Room Logic (Prevents Duplicate Entries)
+  // Join Room & Add to Sidebar
   const handleJoinRoom = (targetRoomId) => {
     const cleaned = targetRoomId.toLowerCase().trim().replace(/[^a-z0-9_-]/g, '');
     if (!cleaned) return;
@@ -360,6 +369,20 @@ export default function App() {
     setNewSidebarRoom('');
   };
 
+  // Delete Room from Sidebar
+  const handleDeleteRoom = (roomToDelete, e) => {
+    e.stopPropagation();
+    const updated = sideRooms.filter((r) => r !== roomToDelete);
+    setSideRooms(updated);
+    if (roomId === roomToDelete) {
+      if (updated.length > 0) {
+        setRoomId(updated[0]);
+      } else {
+        setInRoom(false);
+      }
+    }
+  };
+
   // Send Message
   const handleSendMessage = async (e) => {
     e.preventDefault();
@@ -370,7 +393,7 @@ export default function App() {
     if ((!inputMessage.trim() && !mediaUrlInput.trim()) || !user || !roomId) return;
 
     try {
-      const messagesRef = collection(db, 'artifacts', appId, 'public', 'data', `room_${roomId}_messages`);
+      const messagesRef = collection(db, 'rooms', roomId, 'messages');
       await addDoc(messagesRef, {
         userId: user.uid,
         userName: userName,
@@ -413,14 +436,14 @@ export default function App() {
     }
   };
 
-  // Admin Operations
+  // Admin Actions
   const handleKickUser = async (targetUid, targetName) => {
     if (!isAdmin) return;
     try {
-      const targetRef = doc(db, 'artifacts', appId, 'public', 'data', `room_${roomId}_users`, targetUid);
+      const targetRef = doc(db, 'rooms', roomId, 'users', targetUid);
       await updateDoc(targetRef, { kicked: true });
      
-      const messagesRef = collection(db, 'artifacts', appId, 'public', 'data', `room_${roomId}_messages`);
+      const messagesRef = collection(db, 'rooms', roomId, 'messages');
       await addDoc(messagesRef, {
         userId: 'system',
         userName: 'SYSTEM',
@@ -436,10 +459,10 @@ export default function App() {
   const handleToggleMute = async (targetUid, currentMuteState, targetName) => {
     if (!isAdmin) return;
     try {
-      const targetRef = doc(db, 'artifacts', appId, 'public', 'data', `room_${roomId}_users`, targetUid);
+      const targetRef = doc(db, 'rooms', roomId, 'users', targetUid);
       await updateDoc(targetRef, { isMuted: !currentMuteState });
      
-      const messagesRef = collection(db, 'artifacts', appId, 'public', 'data', `room_${roomId}_messages`);
+      const messagesRef = collection(db, 'rooms', roomId, 'messages');
       await addDoc(messagesRef, {
         userId: 'system',
         userName: 'SYSTEM',
@@ -455,13 +478,13 @@ export default function App() {
   const handleTriggerFakeGlitch = async (targetUid, targetName, glitchType = 'matrix') => {
     if (!isAdmin) return;
     try {
-      const targetRef = doc(db, 'artifacts', appId, 'public', 'data', `room_${roomId}_users`, targetUid);
+      const targetRef = doc(db, 'rooms', roomId, 'users', targetUid);
       await updateDoc(targetRef, {
         glitchActive: true,
         glitchType: glitchType
       });
 
-      const messagesRef = collection(db, 'artifacts', appId, 'public', 'data', `room_${roomId}_messages`);
+      const messagesRef = collection(db, 'rooms', roomId, 'messages');
       await addDoc(messagesRef, {
         userId: 'system',
         userName: 'SYSTEM',
@@ -482,7 +505,7 @@ export default function App() {
 
   const handleSendInteraction = async (targetName, actionType, emoji) => {
     try {
-      const messagesRef = collection(db, 'artifacts', appId, 'public', 'data', `room_${roomId}_messages`);
+      const messagesRef = collection(db, 'rooms', roomId, 'messages');
       await addDoc(messagesRef, {
         userId: user.uid,
         userName: userName,
@@ -735,18 +758,27 @@ export default function App() {
 
               <div className="flex-1 overflow-y-auto space-y-1">
                 {sideRooms.map((r) => (
-                  <button
+                  <div
                     key={r}
                     onClick={() => handleJoinRoom(r)}
-                    className={`w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition ${
+                    className={`group w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
                       roomId === r
                         ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
                         : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
                     }`}
                   >
-                    <Hash className="w-3.5 h-3.5 text-cyan-400" />
-                    <span className="truncate">{r}</span>
-                  </button>
+                    <div className="flex items-center gap-2 truncate">
+                      <Hash className="w-3.5 h-3.5 text-cyan-400" />
+                      <span className="truncate">{r}</span>
+                    </div>
+                    <button
+                      onClick={(e) => handleDeleteRoom(r, e)}
+                      className="opacity-0 group-hover:opacity-100 hover:text-rose-400 transition p-1"
+                      title="Delete room"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 text-slate-500 hover:text-rose-400" />
+                    </button>
+                  </div>
                 ))}
               </div>
 
@@ -793,6 +825,7 @@ export default function App() {
                   messages.map((m) => {
                     const isMe = m.userId === user?.uid;
                     const isSystem = m.userId === 'system';
+                    const isMsgAdmin = m.isAdmin || m.userName === 'LEO_';
 
                     if (isSystem) {
                       return (
@@ -811,14 +844,24 @@ export default function App() {
                         </div>
                         <div className={`space-y-1 ${isMe ? 'items-end' : 'items-start'}`}>
                           <div className={`flex items-center gap-2 ${isMe ? 'justify-end' : ''}`}>
-                            <span className="text-xs font-bold text-slate-300">{m.userName}</span>
-                            <span className="text-[9px] bg-slate-800 text-cyan-400 font-bold px-1.5 py-0.5 rounded-full">
-                              R{m.rank || 0}
+                            <span className={`text-xs font-bold ${isMsgAdmin ? 'text-amber-400 flex items-center gap-1' : 'text-slate-300'}`}>
+                              {isMsgAdmin && <Crown className="w-3.5 h-3.5 text-amber-400" />}
+                              {m.userName}
+                            </span>
+                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
+                              isMsgAdmin
+                                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                                : 'bg-slate-800 text-cyan-400'
+                            }`}>
+                              R{m.rank || (isMsgAdmin ? 100 : 0)}
                             </span>
                           </div>
 
+                          {/* Message Bubble Styling */}
                           <div className={`p-3.5 rounded-2xl text-sm ${
-                            isMe
+                            isMsgAdmin
+                              ? 'bg-amber-950/40 border border-amber-500/50 text-amber-200 shadow-lg shadow-amber-500/10'
+                              : isMe
                               ? 'bg-gradient-to-r from-cyan-600 to-indigo-600 text-white rounded-tr-none'
                               : 'bg-slate-900 border border-slate-800 text-slate-100 rounded-tl-none'
                           }`}>
