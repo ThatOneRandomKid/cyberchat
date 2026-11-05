@@ -7,14 +7,7 @@ import {
   onAuthStateChanged
 } from 'firebase/auth';
 import {
-  getFirestore,
-  collection,
-  doc,
-  setDoc,
-  addDoc,
-  onSnapshot,
-  updateDoc,
-  deleteDoc
+  getFirestore
 } from 'firebase/firestore';
 import {
   Send,
@@ -38,7 +31,9 @@ import {
   UserX,
   Disc,
   Clock,
-  ShieldAlert
+  Terminal,
+  Zap,
+  Activity
 } from 'lucide-react';
 
 // --- Firebase Config & Fallback ---
@@ -56,7 +51,6 @@ const firebaseConfig = typeof __firebase_config !== 'undefined'
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'cyber-hub-v1';
 
 const ALL_COLOR_GRADIENTS = [
   'from-cyan-500 to-blue-600',
@@ -70,8 +64,7 @@ const ALL_COLOR_GRADIENTS = [
   'from-sky-400 to-indigo-600'
 ];
 
-// Strictly locks Crown (👑) to Admin (LEO_).
-// Non-admin rank icons update slowly over time.
+// Crown is strictly restricted to Admin (LEO_)
 const getRankIcon = (rank, isAdmin) => {
   if (isAdmin) return '👑';
   if (rank >= 50) return '💎';
@@ -99,17 +92,16 @@ export default function App() {
 
   const [isProfileSet, setIsProfileSet] = useState(() => localStorage.getItem('hub_isregistered') === 'true');
 
-  // Active time tracking - HARDER RANK-UP ENGINE (300 seconds / 5 min = 1 Rank)
+  // Harder Rank Engine: 300 Seconds (5 Min) = 1 Rank Level
   const [activeSeconds, setActiveSeconds] = useState(() => {
     const saved = localStorage.getItem('hub_activeseconds');
     return saved ? parseInt(saved, 10) : 0;
   });
   
-  // Calculate Rank (1 Rank every 300 seconds)
   const userRank = (isAdmin ? 100 : 0) + Math.floor(activeSeconds / 300);
   const currentBadgeIcon = getRankIcon(userRank, isAdmin);
 
-  // Room & Approval Control States
+  // Room & Special FX States
   const [roomId, setRoomId] = useState('');
   const [inRoom, setInRoom] = useState(false);
   const [isWaitingForApproval, setIsWaitingForApproval] = useState(false);
@@ -120,6 +112,7 @@ export default function App() {
   const [copiedLink, setCopiedLink] = useState(false);
   const [customRoomInput, setCustomRoomInput] = useState('');
   const [activeDiscoMode, setActiveDiscoMode] = useState(false);
+  const [activeMatrixMode, setActiveMatrixMode] = useState(false);
 
   // Room Creators & Approval Storage
   const [roomCreators, setRoomCreators] = useState(() => {
@@ -176,9 +169,22 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Sync Messages, Disco, and Live Creator Approval Requests
+  // Isolated Room Message & Special Event Listener Sync
   useEffect(() => {
     if (!roomId) return;
+
+    // Load messages ONLY for the current active room
+    const loadRoomMessages = () => {
+      const roomMsgsKey = `hub_msg_sync_${roomId}`;
+      const savedMsgs = localStorage.getItem(roomMsgsKey);
+      if (savedMsgs) {
+        setMessages(JSON.parse(savedMsgs));
+      } else {
+        setMessages([]);
+      }
+    };
+
+    loadRoomMessages();
 
     const handleStorageEvent = (e) => {
       if (e.key === `hub_msg_sync_${roomId}`) {
@@ -206,10 +212,13 @@ export default function App() {
           setTimeout(() => setActiveDiscoMode(false), 8000);
         }
       }
+      if (e.key === `hub_matrix_sync_${roomId}`) {
+        if (e.newValue === 'true') {
+          setActiveMatrixMode(true);
+          setTimeout(() => setActiveMatrixMode(false), 9000);
+        }
+      }
     };
-
-    const existingMsgs = localStorage.getItem(`hub_msg_sync_${roomId}`);
-    if (existingMsgs) setMessages(JSON.parse(existingMsgs));
 
     const existingReqs = localStorage.getItem(`hub_requests_sync_${roomId}`);
     if (existingReqs) setJoinRequests(JSON.parse(existingReqs));
@@ -218,7 +227,7 @@ export default function App() {
     return () => window.removeEventListener('storage', handleStorageEvent);
   }, [roomId, userName, sideRooms]);
 
-  // Harder Rank Heartbeat
+  // Active Rank Heartbeat Timer
   useEffect(() => {
     if (!inRoom) return;
     const timer = setInterval(() => {
@@ -279,14 +288,14 @@ export default function App() {
     setUserPassword('');
   };
 
-  // Join Room with Login Screen Approval Logic
+  // Join Room with Access Check
   const handleJoinRoom = (targetRoomId, overrideUsername = userName) => {
     const cleaned = targetRoomId.toLowerCase().trim().replace(/[^a-z0-9_-]/g, '');
     if (!cleaned) return;
 
     let currentCreators = { ...roomCreators };
 
-    // First person to enter becomes Room Creator
+    // Register creator if room is brand new
     if (!currentCreators[cleaned]) {
       currentCreators[cleaned] = overrideUsername;
       setRoomCreators(currentCreators);
@@ -344,7 +353,6 @@ export default function App() {
     const updatedReqs = joinRequests.filter(r => r.user !== targetUser);
     setJoinRequests(updatedReqs);
     localStorage.setItem(`hub_requests_sync_${roomId}`, JSON.stringify(updatedReqs));
-
     localStorage.setItem(`hub_approval_user_${targetUser}_${roomId}`, 'approved');
 
     const systemMsg = {
@@ -368,7 +376,7 @@ export default function App() {
     window.dispatchEvent(new Event('storage'));
   };
 
-  // Admin Disco Tool
+  // Admin Tool: Trigger Disco Ball Drop
   const triggerDiscoBall = () => {
     if (!isAdmin) return;
     setActiveDiscoMode(true);
@@ -380,7 +388,19 @@ export default function App() {
     }, 8000);
   };
 
-  // Actions
+  // Admin Tool: Trigger Cyber Matrix Rain Event
+  const triggerMatrixRain = () => {
+    if (!isAdmin) return;
+    setActiveMatrixMode(true);
+    localStorage.setItem(`hub_matrix_sync_${roomId}`, 'true');
+    window.dispatchEvent(new Event('storage'));
+    setTimeout(() => {
+      setActiveMatrixMode(false);
+      localStorage.setItem(`hub_matrix_sync_${roomId}`, 'false');
+    }, 9000);
+  };
+
+  // Action Tools
   const handleAction = (actionType, targetUser, emoji) => {
     const actionMsg = {
       id: Date.now(),
@@ -395,7 +415,7 @@ export default function App() {
     window.dispatchEvent(new Event('storage'));
   };
 
-  // Send Message
+  // Send Chat Message to Isolated Room Storage Key
   const handleSendMessage = (e) => {
     e.preventDefault();
     if ((!inputMessage.trim() && !mediaUrlInput.trim()) || !roomId) return;
@@ -426,19 +446,10 @@ export default function App() {
     setShowMediaModal(false);
   };
 
-  const handleCopyShareLink = () => {
-    const shareableUrl = `${window.location.origin}${window.location.pathname}?room=${roomId || customRoomInput || 'cyber-lobby'}`;
-    navigator.clipboard.writeText(shareableUrl);
-    setCopiedLink(true);
-    setTimeout(() => setCopiedLink(false), 2000);
-  };
-
   const isCurrentRoomCreator = roomCreators[roomId] === userName;
 
   return (
-    <div className={`min-h-screen bg-slate-950 text-slate-100 flex flex-col font-mono overflow-hidden relative ${
-      activeDiscoMode ? 'animate-pulse' : ''
-    }`}>
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-mono overflow-hidden relative">
 
       {/* DISCO BALL DROP OVERLAY */}
       {activeDiscoMode && (
@@ -455,6 +466,22 @@ export default function App() {
         </div>
       )}
 
+      {/* MATRIX CYBER RAIN OVERLAY */}
+      {activeMatrixMode && (
+        <div className="fixed inset-0 z-50 pointer-events-none bg-black/90 flex flex-col items-center justify-center p-6 text-center overflow-hidden">
+          <div className="absolute inset-0 opacity-40 font-mono text-emerald-400 text-xs leading-none overflow-hidden select-none whitespace-pre">
+            {`0101010101001010101010101010101010101010101010101010101010101\n` +
+             `1010101010101010101010101010101010101010101010101010101010101\n` +
+             `01010101010101010101010101010101010101010101010101010101010101\n`.repeat(20)}
+          </div>
+          <div className="z-10 bg-slate-900/90 border-2 border-emerald-400 p-8 rounded-3xl shadow-2xl shadow-emerald-500/30 max-w-md animate-pulse">
+            <Terminal className="w-14 h-14 text-emerald-400 mx-auto mb-3 animate-bounce" />
+            <h3 className="text-2xl font-black text-emerald-400 tracking-wider mb-2">⚡ MATRIX CODE INJECTION ⚡</h3>
+            <p className="text-xs text-slate-300">Admin LEO_ initialized quantum matrix rain override across grid node #{roomId}.</p>
+          </div>
+        </div>
+      )}
+
       {/* WAITING FOR CREATOR APPROVAL SCREEN */}
       {isWaitingForApproval && (
         <div className="fixed inset-0 z-40 bg-slate-950/95 flex flex-col items-center justify-center p-6 text-center">
@@ -463,7 +490,7 @@ export default function App() {
           </div>
           <h2 className="text-2xl font-black text-white mb-2">Waiting for Permission...</h2>
           <p className="text-sm text-slate-400 max-w-sm mb-6">
-            Room <span className="text-cyan-400 font-bold">#{roomId}</span> is private. Sent a join request to creator <span className="text-amber-400 font-bold">@{roomCreators[roomId]}</span>.
+            Room <span className="text-cyan-400 font-bold">#{roomId}</span> is private. Request sent to creator <span className="text-amber-400 font-bold">@{roomCreators[roomId]}</span>.
           </p>
           <button
             onClick={() => setIsWaitingForApproval(false)}
@@ -483,7 +510,7 @@ export default function App() {
               <h1 className="text-3xl font-black bg-gradient-to-r from-cyan-400 to-pink-400 bg-clip-text text-transparent">
                 CYBERHUB
               </h1>
-              <p className="text-xs text-slate-400 mt-1">Sign in & join interactive cyber rooms</p>
+              <p className="text-xs text-slate-400 mt-1">Sign in & join isolated cyber rooms</p>
             </div>
 
             <form onSubmit={handleSignIn} className="space-y-4">
@@ -560,12 +587,20 @@ export default function App() {
 
             <div className="flex items-center gap-2">
               {isAdmin && (
-                <button
-                  onClick={triggerDiscoBall}
-                  className="bg-purple-600 hover:bg-purple-500 text-white text-xs px-3 py-2 rounded-xl flex items-center gap-1.5 font-extrabold shadow-lg shadow-purple-500/30 animate-bounce"
-                >
-                  <Disc className="w-4 h-4 animate-spin" /> Drop Disco Ball
-                </button>
+                <>
+                  <button
+                    onClick={triggerDiscoBall}
+                    className="bg-purple-600 hover:bg-purple-500 text-white text-xs px-3 py-2 rounded-xl flex items-center gap-1.5 font-extrabold shadow-lg shadow-purple-500/30"
+                  >
+                    <Disc className="w-4 h-4 animate-spin" /> Disco FX
+                  </button>
+                  <button
+                    onClick={triggerMatrixRain}
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3 py-2 rounded-xl flex items-center gap-1.5 font-extrabold shadow-lg shadow-emerald-500/30"
+                  >
+                    <Terminal className="w-4 h-4" /> Matrix FX
+                  </button>
+                </>
               )}
 
               <button
