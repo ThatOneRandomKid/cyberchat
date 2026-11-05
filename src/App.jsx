@@ -18,26 +18,20 @@ import {
 } from 'firebase/firestore';
 import {
   Send,
-  Smile,
-  Image as ImageIcon,
   Volume2,
   VolumeX,
-  Copy,
   Check,
   Users,
   MessageSquare,
-  PlusCircle,
   LogOut,
   Sparkles,
-  Shield,
   Crown,
   Lock,
   Share2,
   LogIn,
-  Ghost,
-  UserMinus,
   Plus,
-  Hash
+  Hash,
+  ImageIcon
 } from 'lucide-react';
 
 // --- Firebase Config & App Initialization ---
@@ -57,7 +51,7 @@ const db = getFirestore(app);
 const auth = getAuth(app);
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'cyber-hub-v1';
 
-// --- Preset Avatars & Color Gradients ---
+// Preset Avatars & Color Gradients
 const AVATAR_COLORS = [
   'from-cyan-500 to-blue-600',
   'from-purple-500 to-pink-600',
@@ -69,7 +63,7 @@ const AVATAR_COLORS = [
 
 const AVATAR_ICONS = ['👑', '🤖', '⚡', '🔥', '💀', '👽', '🚀', '🎯'];
 
-// Audio FX synthesizer generator
+// Sound FX Synthesizer Generator
 const playSoundEffect = (type, soundEnabled) => {
   if (!soundEnabled) return;
   try {
@@ -102,32 +96,28 @@ const playSoundEffect = (type, soundEnabled) => {
 };
 
 export default function App() {
-  // --- Auth & User State ---
+  // Auth & Profile State
   const [user, setUser] = useState(null);
   const [userName, setUserName] = useState(() => localStorage.getItem('hub_username') || '');
   const [userPassword, setUserPassword] = useState('');
   const [nameError, setNameError] = useState('');
   const [isAdmin, setIsAdmin] = useState(() => localStorage.getItem('hub_isadmin') === 'true');
 
-  // Glitch effect & Mute state for recipient
   const [activeGlitchEffect, setActiveGlitchEffect] = useState(null);
   const [isMuted, setIsMuted] = useState(false);
 
-  // Custom avatar choice for admin, default star badge for regular users
   const [userIcon, setUserIcon] = useState(() => localStorage.getItem('hub_usericon') || (isAdmin ? '👑' : '⭐'));
   const [userGradient, setUserGradient] = useState(() => localStorage.getItem('hub_usergradient') || AVATAR_COLORS[0]);
   const [isProfileSet, setIsProfileSet] = useState(() => localStorage.getItem('hub_isregistered') === 'true');
 
-  // Time & Rank tracking (Seconds active)
+  // Time & Rank Tracking
   const [activeSeconds, setActiveSeconds] = useState(() => {
     const saved = localStorage.getItem('hub_activeseconds');
     return saved ? parseInt(saved, 10) : 0;
   });
-
-  // Calculate Rank: Admin starts at Rank 100, standard users start at Rank 0 (+1 per 60s active)
   const userRank = (isAdmin ? 100 : 0) + Math.floor(activeSeconds / 60);
 
-  // --- Room & App State ---
+  // Room State
   const [roomId, setRoomId] = useState('');
   const [inRoom, setInRoom] = useState(false);
   const [messages, setMessages] = useState([]);
@@ -139,13 +129,15 @@ export default function App() {
   const [copiedLink, setCopiedLink] = useState(false);
   const [customRoomInput, setCustomRoomInput] = useState('');
   const [showMobileSidebar, setShowMobileSidebar] = useState(false);
+  
+  // Unique Room List (Prevents Duplicates)
   const [sideRooms, setSideRooms] = useState(['cyber-lobby', 'vip-lounge', 'dev-vault']);
   const [newSidebarRoom, setNewSidebarRoom] = useState('');
 
   const chatEndRef = useRef(null);
   const prevMessagesLength = useRef(0);
 
-  // 1. Initial Authentication with Error Fallback for Sandboxed Envs
+  // Initialize Firebase Auth
   useEffect(() => {
     const initAuth = async () => {
       try {
@@ -171,7 +163,7 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Check URL query parameters or location hash for room link on mount
+  // Parse URL for shared room link on page load
   useEffect(() => {
     try {
       const getRoomFromURL = () => {
@@ -187,7 +179,7 @@ export default function App() {
 
       const roomParam = getRoomFromURL();
       if (roomParam) {
-        const cleanedRoom = roomParam.toLowerCase().trim();
+        const cleanedRoom = roomParam.toLowerCase().trim().replace(/[^a-z0-9_-]/g, '');
         setRoomId(cleanedRoom);
         setCustomRoomInput(cleanedRoom);
       }
@@ -196,7 +188,7 @@ export default function App() {
     }
   }, []);
 
-  // Timer Heartbeat: Increment active seconds when user is connected to a room
+  // Active user timer heartbeat
   useEffect(() => {
     if (!inRoom) return;
     const timer = setInterval(() => {
@@ -209,18 +201,17 @@ export default function App() {
     return () => clearInterval(timer);
   }, [inRoom]);
 
-  // Scroll to bottom on new messages
+  // Scroll chat to bottom on new messages
   useEffect(() => {
     if (inRoom) {
       chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [messages, inRoom]);
 
-  // 2. Room Data Syncing & Room Presence System
+  // Firestore Realtime Synchronization for Messages & Online Presence
   useEffect(() => {
     if (!user || !inRoom || !roomId) return;
 
-    // Listen for incoming Admin Actions & Glitch FX targetted at this user
     const userDocRef = doc(db, 'artifacts', appId, 'public', 'data', `room_${roomId}_users`, user.uid);
     const unsubscribeUserDoc = onSnapshot(userDocRef, (snap) => {
       if (snap.exists()) {
@@ -240,7 +231,7 @@ export default function App() {
       }
     });
 
-    // Subscriptions for room messages
+    // Realtime message listener
     const messagesRef = collection(db, 'artifacts', appId, 'public', 'data', `room_${roomId}_messages`);
     const unsubscribeMessages = onSnapshot(
       messagesRef,
@@ -261,7 +252,7 @@ export default function App() {
       (error) => console.error("Firestore message sub error:", error)
     );
 
-    // Online Presence Heartbeat
+    // Presence Sync
     const registerPresence = async () => {
       await setDoc(userDocRef, {
         uid: user.uid,
@@ -277,7 +268,6 @@ export default function App() {
     registerPresence();
     const heartbeatInterval = setInterval(registerPresence, 15000);
 
-    // Sync Active Users
     const usersCollectionRef = collection(db, 'artifacts', appId, 'public', 'data', `room_${roomId}_users`);
     const unsubscribeUsers = onSnapshot(
       usersCollectionRef,
@@ -300,7 +290,7 @@ export default function App() {
     };
   }, [user, inRoom, roomId, soundEnabled, userName, userIcon, userGradient, userRank, isAdmin]);
 
-  // Sign In / Register Handle
+  // Sign In Handler
   const handleSignIn = (e) => {
     e.preventDefault();
     setNameError('');
@@ -332,10 +322,7 @@ export default function App() {
     localStorage.setItem('hub_isregistered', 'true');
     setIsProfileSet(true);
 
-    const targetRoom = customRoomInput.trim() || 'cyber-lobby';
-    if (!sideRooms.includes(targetRoom)) {
-      setSideRooms((prev) => [...prev, targetRoom]);
-    }
+    const targetRoom = customRoomInput.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '') || 'cyber-lobby';
     handleJoinRoom(targetRoom);
   };
 
@@ -349,12 +336,18 @@ export default function App() {
     setUserPassword('');
   };
 
+  // Switch/Join Room Logic (Prevents Duplicate Entries)
   const handleJoinRoom = (targetRoomId) => {
     const cleaned = targetRoomId.toLowerCase().trim().replace(/[^a-z0-9_-]/g, '');
     if (!cleaned) return;
-    if (!sideRooms.includes(cleaned)) {
-      setSideRooms((prev) => [...prev, cleaned]);
-    }
+    
+    setSideRooms((prev) => {
+      if (!prev.includes(cleaned)) {
+        return [...prev, cleaned];
+      }
+      return prev;
+    });
+    
     setRoomId(cleaned);
     setInRoom(true);
   };
@@ -363,13 +356,11 @@ export default function App() {
     e.preventDefault();
     const cleaned = newSidebarRoom.toLowerCase().trim().replace(/[^a-z0-9_-]/g, '');
     if (!cleaned) return;
-    if (!sideRooms.includes(cleaned)) {
-      setSideRooms((prev) => [...prev, cleaned]);
-    }
     handleJoinRoom(cleaned);
     setNewSidebarRoom('');
   };
 
+  // Send Message
   const handleSendMessage = async (e) => {
     e.preventDefault();
     if (isMuted) {
@@ -422,7 +413,7 @@ export default function App() {
     }
   };
 
-  // Admin Control Functions
+  // Admin Operations
   const handleKickUser = async (targetUid, targetName) => {
     if (!isAdmin) return;
     try {
@@ -537,7 +528,7 @@ export default function App() {
         </div>
       )}
 
-      {/* SIGN IN / LANDING PAGE */}
+      {/* LOGIN PORTAL */}
       {!isProfileSet || !inRoom ? (
         <div className="flex-1 flex flex-col items-center justify-center p-4 bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-950 relative overflow-y-auto">
           <div className="w-full max-w-md bg-slate-900/90 border border-slate-800 p-8 rounded-3xl shadow-2xl backdrop-blur-xl relative">
@@ -666,9 +657,9 @@ export default function App() {
           </div>
         </div>
       ) : (
-        /* MAIN CHAT APPLICATION ROOM */
+        /* MAIN CHAT APPLICATION */
         <div className="flex-1 flex flex-col h-screen">
-          {/* TOP BAR */}
+          {/* HEADER BAR */}
           <header className="h-16 bg-slate-900 border-b border-slate-800 px-4 flex items-center justify-between shrink-0">
             <div className="flex items-center gap-3">
               <div className={`w-10 h-10 rounded-xl bg-gradient-to-tr ${userGradient} flex items-center justify-center text-xl shadow-md relative`}>
