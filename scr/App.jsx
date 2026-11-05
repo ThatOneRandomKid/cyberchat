@@ -35,7 +35,6 @@ import {
   Share2,
   LogIn,
   Ghost,
-  VolumeOff,
   UserMinus
 } from 'lucide-react';
 
@@ -873,7 +872,7 @@ export default function App() {
                                   onClick={() => handleToggleMute(u.uid, u.isMuted, u.name)}
                                   className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] py-1 px-1.5 rounded-lg font-bold flex items-center justify-center gap-1"
                                 >
-                                  <VolumeOff className="w-3 h-3 text-amber-400" /> {u.isMuted ? 'Unmute' : 'Mute'}
+                                  <VolumeX className="w-3 h-3 text-amber-400" /> {u.isMuted ? 'Unmute' : 'Mute'}
                                 </button>
                                 <button
                                   onClick={() => handleKickUser(u.uid, u.name)}
