@@ -33,10 +33,13 @@ import {
   Clock,
   Terminal,
   Zap,
-  Activity
+  Activity,
+  Flag,
+  Palette,
+  AlertTriangle,
+  Upload
 } from 'lucide-react';
 
-// --- Firebase Config & Fallback ---
 const firebaseConfig = typeof __firebase_config !== 'undefined'
   ? JSON.parse(__firebase_config)
   : {
@@ -64,7 +67,13 @@ const ALL_COLOR_GRADIENTS = [
   'from-sky-400 to-indigo-600'
 ];
 
-// Crown is strictly restricted to Admin (LEO_)
+const ROOM_BACKGROUND_PRESETS = [
+  { label: 'Deep Cyber', value: 'bg-slate-950' },
+  { label: 'Neon Void', value: 'bg-gradient-to-br from-purple-950 via-slate-950 to-indigo-950' },
+  { label: 'Matrix Grid', value: 'bg-gradient-to-br from-emerald-950 via-slate-950 to-teal-950' },
+  { label: 'Solar Flare', value: 'bg-gradient-to-br from-amber-950 via-slate-950 to-rose-950' }
+];
+
 const getRankIcon = (rank, isAdmin) => {
   if (isAdmin) return '👑';
   if (rank >= 50) return '💎';
@@ -92,7 +101,13 @@ export default function App() {
 
   const [isProfileSet, setIsProfileSet] = useState(() => localStorage.getItem('hub_isregistered') === 'true');
 
-  // Harder Rank Engine: 300 Seconds (5 Min) = 1 Rank Level
+  // Account Password Vault Storage
+  const [userVault, setUserVault] = useState(() => {
+    const saved = localStorage.getItem('hub_user_vault');
+    return saved ? JSON.parse(saved) : {};
+  });
+
+  // Rank Engine (300 seconds / 5 min = 1 Rank)
   const [activeSeconds, setActiveSeconds] = useState(() => {
     const saved = localStorage.getItem('hub_activeseconds');
     return saved ? parseInt(saved, 10) : 0;
@@ -113,6 +128,25 @@ export default function App() {
   const [customRoomInput, setCustomRoomInput] = useState('');
   const [activeDiscoMode, setActiveDiscoMode] = useState(false);
   const [activeMatrixMode, setActiveMatrixMode] = useState(false);
+
+  // Room Customization & Reporting Modals
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [showRoomStyleModal, setShowRoomStyleModal] = useState(false);
+  const [showReportDashboard, setShowReportDashboard] = useState(false);
+
+  // Report Form Inputs
+  const [reportTargetUser, setReportTargetUser] = useState('');
+  const [reportReason, setReportReason] = useState('');
+  const [reportScreenshotUrl, setReportScreenshotUrl] = useState('');
+
+  // Room Custom Styling States
+  const [roomStyles, setRoomStyles] = useState(() => {
+    const saved = localStorage.getItem('hub_room_styles');
+    return saved ? JSON.parse(saved) : {};
+  });
+
+  // Global Reports Store
+  const [reportsList, setReportsList] = useState([]);
 
   // Room Creators & Approval Storage
   const [roomCreators, setRoomCreators] = useState(() => {
@@ -146,6 +180,14 @@ export default function App() {
     localStorage.setItem('hub_approved_rooms', JSON.stringify(approvedRooms));
   }, [approvedRooms]);
 
+  useEffect(() => {
+    localStorage.setItem('hub_user_vault', JSON.stringify(userVault));
+  }, [userVault]);
+
+  useEffect(() => {
+    localStorage.setItem('hub_room_styles', JSON.stringify(roomStyles));
+  }, [roomStyles]);
+
   // Auth Initialization
   useEffect(() => {
     const initAuth = async () => {
@@ -169,11 +211,10 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Isolated Room Message & Special Event Listener Sync
+  // Room Storage & Sync Listener
   useEffect(() => {
     if (!roomId) return;
 
-    // Load messages ONLY for the current active room
     const loadRoomMessages = () => {
       const roomMsgsKey = `hub_msg_sync_${roomId}`;
       const savedMsgs = localStorage.getItem(roomMsgsKey);
@@ -186,12 +227,22 @@ export default function App() {
 
     loadRoomMessages();
 
+    // Load Reports
+    const savedReports = localStorage.getItem(`hub_reports_sync_${roomId}`);
+    if (savedReports) setReportsList(JSON.parse(savedReports));
+
     const handleStorageEvent = (e) => {
       if (e.key === `hub_msg_sync_${roomId}`) {
         if (e.newValue) setMessages(JSON.parse(e.newValue));
       }
       if (e.key === `hub_requests_sync_${roomId}`) {
         if (e.newValue) setJoinRequests(JSON.parse(e.newValue));
+      }
+      if (e.key === `hub_reports_sync_${roomId}`) {
+        if (e.newValue) setReportsList(JSON.parse(e.newValue));
+      }
+      if (e.key === `hub_styles_sync`) {
+        if (e.newValue) setRoomStyles(JSON.parse(e.newValue));
       }
       if (e.key === `hub_approval_user_${userName}_${roomId}`) {
         if (e.newValue === 'approved') {
@@ -247,6 +298,7 @@ export default function App() {
     }
   }, [messages, inRoom]);
 
+  // Password Authentication & Account Vault Handler
   const handleSignIn = (e) => {
     e.preventDefault();
     setNameError('');
@@ -257,6 +309,12 @@ export default function App() {
       return;
     }
 
+    if (!userPassword.trim()) {
+      setNameError('Password is required for account verification.');
+      return;
+    }
+
+    // Admin Verification
     if (cleanName === 'LEO_') {
       if (userPassword !== 'password') {
         setNameError('Incorrect admin password for LEO_.');
@@ -265,6 +323,18 @@ export default function App() {
       setIsAdmin(true);
       localStorage.setItem('hub_isadmin', 'true');
     } else {
+      // Standard Account Password System
+      let currentVault = { ...userVault };
+      if (currentVault[cleanName]) {
+        if (currentVault[cleanName] !== userPassword) {
+          setNameError('Incorrect account password for this username!');
+          return;
+        }
+      } else {
+        // Register new password for user
+        currentVault[cleanName] = userPassword;
+        setUserVault(currentVault);
+      }
       setIsAdmin(false);
       localStorage.setItem('hub_isadmin', 'false');
     }
@@ -288,14 +358,12 @@ export default function App() {
     setUserPassword('');
   };
 
-  // Join Room with Access Check
   const handleJoinRoom = (targetRoomId, overrideUsername = userName) => {
     const cleaned = targetRoomId.toLowerCase().trim().replace(/[^a-z0-9_-]/g, '');
     if (!cleaned) return;
 
     let currentCreators = { ...roomCreators };
 
-    // Register creator if room is brand new
     if (!currentCreators[cleaned]) {
       currentCreators[cleaned] = overrideUsername;
       setRoomCreators(currentCreators);
@@ -348,6 +416,58 @@ export default function App() {
     }
   };
 
+  // Submit User Report (Includes Image URL & Reason)
+  const handleFileScreenshot = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setReportScreenshotUrl(reader.result);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleSubmitReport = (e) => {
+    e.preventDefault();
+    if (!reportTargetUser.trim() || !reportReason.trim()) return;
+
+    const newReport = {
+      id: Date.now(),
+      reportedBy: userName,
+      targetUser: reportTargetUser.trim(),
+      reason: reportReason.trim(),
+      screenshot: reportScreenshotUrl.trim() || null,
+      timestamp: new Date().toLocaleString(),
+      status: 'pending'
+    };
+
+    const updated = [...reportsList, newReport];
+    setReportsList(updated);
+    localStorage.setItem(`hub_reports_sync_${roomId}`, JSON.stringify(updated));
+    window.dispatchEvent(new Event('storage'));
+
+    alert(`✅ Report filed against @${reportTargetUser}. Sent to room owner & admin for review.`);
+    setShowReportModal(false);
+    setReportTargetUser('');
+    setReportReason('');
+    setReportScreenshotUrl('');
+  };
+
+  // Change Room Style (Color or Image Background)
+  const handleUpdateRoomStyle = (backgroundValue, isCustomImage = false) => {
+    const updatedStyles = {
+      ...roomStyles,
+      [roomId]: isCustomImage 
+        ? { type: 'image', value: backgroundValue } 
+        : { type: 'color', value: backgroundValue }
+    };
+    setRoomStyles(updatedStyles);
+    localStorage.setItem('hub_styles_sync', JSON.stringify(updatedStyles));
+    window.dispatchEvent(new Event('storage'));
+    setShowRoomStyleModal(false);
+  };
+
   // Creator Approvals
   const handleApproveUser = (targetUser) => {
     const updatedReqs = joinRequests.filter(r => r.user !== targetUser);
@@ -376,7 +496,7 @@ export default function App() {
     window.dispatchEvent(new Event('storage'));
   };
 
-  // Admin Tool: Trigger Disco Ball Drop
+  // Upgraded Disco FX
   const triggerDiscoBall = () => {
     if (!isAdmin) return;
     setActiveDiscoMode(true);
@@ -388,7 +508,7 @@ export default function App() {
     }, 8000);
   };
 
-  // Admin Tool: Trigger Cyber Matrix Rain Event
+  // Upgraded Matrix FX
   const triggerMatrixRain = () => {
     if (!isAdmin) return;
     setActiveMatrixMode(true);
@@ -400,7 +520,7 @@ export default function App() {
     }, 9000);
   };
 
-  // Action Tools
+  // Actions
   const handleAction = (actionType, targetUser, emoji) => {
     const actionMsg = {
       id: Date.now(),
@@ -415,7 +535,7 @@ export default function App() {
     window.dispatchEvent(new Event('storage'));
   };
 
-  // Send Chat Message to Isolated Room Storage Key
+  // Send Message
   const handleSendMessage = (e) => {
     e.preventDefault();
     if ((!inputMessage.trim() && !mediaUrlInput.trim()) || !roomId) return;
@@ -447,37 +567,196 @@ export default function App() {
   };
 
   const isCurrentRoomCreator = roomCreators[roomId] === userName;
+  const currentStyle = roomStyles[roomId] || { type: 'color', value: 'bg-slate-950' };
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-mono overflow-hidden relative">
 
-      {/* DISCO BALL DROP OVERLAY */}
+      {/* UPGRADED ULTRA DISCO MODE OVERLAY */}
       {activeDiscoMode && (
-        <div className="fixed inset-0 z-50 pointer-events-none flex flex-col items-center justify-start bg-black/40 backdrop-blur-sm overflow-hidden">
-          <div className="absolute inset-0 bg-gradient-to-r from-pink-500/20 via-cyan-500/20 to-purple-500/20 animate-spin" />
-          <div className="w-1 bg-slate-400 h-24 animate-bounce" />
-          <div className="relative w-28 h-28 bg-gradient-to-tr from-slate-200 via-white to-slate-400 rounded-full shadow-2xl shadow-cyan-400 flex items-center justify-center animate-bounce border-4 border-cyan-300">
-            <Disc className="w-20 h-20 text-slate-900 animate-spin" />
-            <Sparkles className="w-10 h-10 text-amber-300 absolute animate-ping" />
+        <div className="fixed inset-0 z-50 pointer-events-none flex flex-col items-center justify-start bg-black/50 backdrop-blur-sm overflow-hidden">
+          {/* Laser Sweeps */}
+          <div className="absolute inset-0 bg-gradient-to-r from-pink-500/30 via-cyan-500/30 to-amber-500/30 animate-pulse" />
+          <div className="absolute inset-0 bg-gradient-to-b from-purple-600/20 via-transparent to-pink-600/20 animate-spin" />
+          
+          {/* Shimmering Ball */}
+          <div className="w-1 bg-gradient-to-b from-slate-200 to-slate-500 h-28 animate-bounce" />
+          <div className="relative w-36 h-36 bg-gradient-to-tr from-cyan-300 via-pink-300 to-amber-200 rounded-full shadow-[0_0_60px_rgba(6,182,212,0.8)] flex items-center justify-center animate-bounce border-4 border-white">
+            <Disc className="w-24 h-24 text-slate-950 animate-spin" />
+            <Sparkles className="w-12 h-12 text-amber-300 absolute animate-ping" />
           </div>
-          <div className="mt-4 bg-slate-900/90 border border-amber-400 px-6 py-2 rounded-full text-amber-300 font-extrabold text-sm tracking-widest shadow-xl animate-bounce">
-            🪩 DISCO PARTY MODE ACTIVATED BY ADMIN LEO_ 🪩
+
+          <div className="mt-6 bg-slate-900/90 border-2 border-amber-400 px-8 py-3 rounded-full text-amber-300 font-black text-base tracking-widest shadow-2xl animate-bounce flex items-center gap-2">
+            <Sparkles className="w-5 h-5 text-amber-400 animate-spin" />
+            🪩 HIGH-ENERGY DISCO EVENT TRIGGERED BY LEO_ 🪩
           </div>
         </div>
       )}
 
-      {/* MATRIX CYBER RAIN OVERLAY */}
+      {/* UPGRADED ULTRA MATRIX CODE RAIN OVERLAY */}
       {activeMatrixMode && (
-        <div className="fixed inset-0 z-50 pointer-events-none bg-black/90 flex flex-col items-center justify-center p-6 text-center overflow-hidden">
-          <div className="absolute inset-0 opacity-40 font-mono text-emerald-400 text-xs leading-none overflow-hidden select-none whitespace-pre">
+        <div className="fixed inset-0 z-50 pointer-events-none bg-black/95 flex flex-col items-center justify-center p-6 text-center overflow-hidden">
+          <div className="absolute inset-0 opacity-60 font-mono text-emerald-400 text-xs leading-none overflow-hidden select-none whitespace-pre">
             {`0101010101001010101010101010101010101010101010101010101010101\n` +
              `1010101010101010101010101010101010101010101010101010101010101\n` +
-             `01010101010101010101010101010101010101010101010101010101010101\n`.repeat(20)}
+             `01010101010101010101010101010101010101010101010101010101010101\n`.repeat(25)}
           </div>
-          <div className="z-10 bg-slate-900/90 border-2 border-emerald-400 p-8 rounded-3xl shadow-2xl shadow-emerald-500/30 max-w-md animate-pulse">
-            <Terminal className="w-14 h-14 text-emerald-400 mx-auto mb-3 animate-bounce" />
-            <h3 className="text-2xl font-black text-emerald-400 tracking-wider mb-2">⚡ MATRIX CODE INJECTION ⚡</h3>
-            <p className="text-xs text-slate-300">Admin LEO_ initialized quantum matrix rain override across grid node #{roomId}.</p>
+          <div className="z-10 bg-slate-900/90 border-2 border-emerald-400 p-8 rounded-3xl shadow-[0_0_50px_rgba(16,185,129,0.4)] max-w-md animate-pulse">
+            <Terminal className="w-16 h-16 text-emerald-400 mx-auto mb-3 animate-bounce" />
+            <h3 className="text-2xl font-black text-emerald-400 tracking-wider mb-2">⚡ SYSTEM MATRIX OVERRIDE ⚡</h3>
+            <p className="text-xs text-slate-300">Admin LEO_ injected live quantum code streams into grid node #{roomId}.</p>
+          </div>
+        </div>
+      )}
+
+      {/* REPORT SUBMISSION MODAL */}
+      {showReportModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 w-full max-w-md rounded-3xl p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2 text-rose-400 font-black">
+                <Flag className="w-5 h-5" /> File User Report
+              </div>
+              <button onClick={() => setShowReportModal(false)} className="text-slate-400 hover:text-white font-bold">✕</button>
+            </div>
+
+            <form onSubmit={handleSubmitReport} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Target Username</label>
+                <input
+                  type="text"
+                  placeholder="e.g. bob"
+                  value={reportTargetUser}
+                  onChange={(e) => setReportTargetUser(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white outline-none focus:border-rose-400"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Reason for Report</label>
+                <textarea
+                  placeholder="Describe the violation..."
+                  value={reportReason}
+                  onChange={(e) => setReportReason(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white outline-none focus:border-rose-400 h-20 resize-none"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Upload Screenshot</label>
+                <div className="space-y-2">
+                  <input
+                    type="url"
+                    placeholder="https://example.com/screenshot.png"
+                    value={reportScreenshotUrl}
+                    onChange={(e) => setReportScreenshotUrl(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-xs text-white outline-none focus:border-rose-400"
+                  />
+                  <div className="flex items-center gap-2">
+                    <label className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs py-2 px-3 rounded-xl border border-slate-700 cursor-pointer flex items-center justify-center gap-1.5 font-bold">
+                      <Upload className="w-3.5 h-3.5 text-cyan-400" /> Choose File Screenshot
+                      <input type="file" accept="image/*" onChange={handleFileScreenshot} className="hidden" />
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                className="w-full py-3 bg-rose-600 hover:bg-rose-500 text-white font-black text-xs rounded-xl shadow-lg transition"
+              >
+                Send Report to Admin
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ROOM STYLING MODAL (COLOR OR IMAGE BACKDROP) */}
+      {showRoomStyleModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 w-full max-w-md rounded-3xl p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2 text-cyan-400 font-black">
+                <Palette className="w-5 h-5" /> Customize Room Backdrop
+              </div>
+              <button onClick={() => setShowRoomStyleModal(false)} className="text-slate-400 hover:text-white font-bold">✕</button>
+            </div>
+
+            <div className="space-y-3">
+              <label className="block text-xs font-bold uppercase text-slate-400">Color Presets</label>
+              <div className="grid grid-cols-2 gap-2">
+                {ROOM_BACKGROUND_PRESETS.map((preset) => (
+                  <button
+                    key={preset.label}
+                    onClick={() => handleUpdateRoomStyle(preset.value, false)}
+                    className="p-3 rounded-xl bg-slate-950 border border-slate-800 hover:border-cyan-400 text-xs font-bold text-slate-200 text-left transition"
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="pt-2">
+                <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Custom Background Image URL</label>
+                <form onSubmit={(e) => {
+                  e.preventDefault();
+                  const imgUrl = e.target.elements.bgImg.value;
+                  if (imgUrl.trim()) handleUpdateRoomStyle(imgUrl.trim(), true);
+                }} className="space-y-2">
+                  <input
+                    name="bgImg"
+                    type="url"
+                    placeholder="https://example.com/wallpaper.jpeg"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-xs text-white outline-none focus:border-cyan-400"
+                  />
+                  <button
+                    type="submit"
+                    className="w-full py-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black text-xs rounded-xl transition"
+                  >
+                    Apply Image Backdrop
+                  </button>
+                </form>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* REPORT REVIEW DASHBOARD FOR CREATORS / ADMINS */}
+      {showReportDashboard && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 w-full max-w-2xl rounded-3xl p-6 shadow-2xl space-y-4 max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2 text-amber-400 font-black">
+                <ShieldAlert className="w-5 h-5" /> Room Audit & Reports ({reportsList.length})
+              </div>
+              <button onClick={() => setShowReportDashboard(false)} className="text-slate-400 hover:text-white font-bold">✕</button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-3">
+              {reportsList.length === 0 ? (
+                <p className="text-xs text-slate-500 text-center py-8">No active reports filed for #{roomId}.</p>
+              ) : (
+                reportsList.map((rep) => (
+                  <div key={rep.id} className="p-4 bg-slate-950 border border-slate-800 rounded-2xl space-y-2 text-xs">
+                    <div className="flex justify-between items-center text-slate-400">
+                      <span>Reported User: <strong className="text-rose-400">@{rep.targetUser}</strong></span>
+                      <span>By: @{rep.reportedBy} ({rep.timestamp})</span>
+                    </div>
+                    <p className="text-slate-200 bg-slate-900 p-2.5 rounded-xl border border-slate-800/80">{rep.reason}</p>
+                    {rep.screenshot && (
+                      <div className="mt-2">
+                        <span className="text-[10px] text-slate-400 block mb-1 font-bold">Attached Evidence:</span>
+                        <img src={rep.screenshot} alt="Evidence screenshot" className="max-h-48 rounded-xl border border-slate-800 object-cover" />
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -501,7 +780,7 @@ export default function App() {
         </div>
       )}
 
-      {/* SIGN IN & INITIAL ROOM SELECTION */}
+      {/* LOGIN & PASSWORD VERIFICATION SCREEN */}
       {!isProfileSet || (!inRoom && !isWaitingForApproval) ? (
         <div className="flex-1 flex flex-col items-center justify-center p-4 bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-950">
           <div className="w-full max-w-md bg-slate-900/90 border border-slate-800 p-8 rounded-3xl shadow-2xl backdrop-blur-xl">
@@ -510,7 +789,7 @@ export default function App() {
               <h1 className="text-3xl font-black bg-gradient-to-r from-cyan-400 to-pink-400 bg-clip-text text-transparent">
                 CYBERHUB
               </h1>
-              <p className="text-xs text-slate-400 mt-1">Sign in & join isolated cyber rooms</p>
+              <p className="text-xs text-slate-400 mt-1">Sign in with password & join isolated cyber rooms</p>
             </div>
 
             <form onSubmit={handleSignIn} className="space-y-4">
@@ -526,20 +805,22 @@ export default function App() {
                 />
               </div>
 
-              {userName.trim() === 'LEO_' && (
-                <div>
-                  <label className="block text-xs font-bold uppercase text-amber-400 mb-1">Admin Password</label>
-                  <input
-                    type="password"
-                    value={userPassword}
-                    onChange={(e) => setUserPassword(e.target.value)}
-                    className="w-full bg-amber-950/20 border border-amber-500/50 rounded-xl px-4 py-3 text-amber-200 outline-none"
-                    required
-                  />
-                </div>
-              )}
+              <div>
+                <label className="block text-xs font-bold uppercase text-slate-400 mb-1 flex items-center justify-between">
+                  <span>Account Password</span>
+                  <Lock className="w-3.5 h-3.5 text-cyan-400" />
+                </label>
+                <input
+                  type="password"
+                  placeholder="Enter or set your account password..."
+                  value={userPassword}
+                  onChange={(e) => setUserPassword(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-100 outline-none focus:border-cyan-500"
+                  required
+                />
+              </div>
 
-              {nameError && <p className="text-xs text-rose-400 font-bold">{nameError}</p>}
+              {nameError && <p className="text-xs text-rose-400 font-bold bg-rose-950/40 p-2.5 rounded-xl border border-rose-500/30">{nameError}</p>}
 
               <div>
                 <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Room Code</label>
@@ -556,13 +837,13 @@ export default function App() {
                 type="submit"
                 className="w-full py-3.5 bg-gradient-to-r from-cyan-500 to-indigo-600 text-white font-extrabold rounded-xl shadow-lg flex items-center justify-center gap-2"
               >
-                <LogIn className="w-5 h-5" /> Enter Cyberhub Room
+                <LogIn className="w-5 h-5" /> Authenticate & Enter Hub
               </button>
             </form>
           </div>
         </div>
       ) : (
-        /* MAIN CHAT APPLICATION */
+        /* MAIN CHAT APPLICATION DASHBOARD */
         <div className="flex-1 flex flex-col h-screen">
           <header className="h-16 bg-slate-900 border-b border-slate-800 px-4 flex items-center justify-between shrink-0">
             <div className="flex items-center gap-3">
@@ -586,6 +867,31 @@ export default function App() {
             </div>
 
             <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowReportModal(true)}
+                className="bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-500/30 text-xs px-3 py-2 rounded-xl flex items-center gap-1.5 font-bold transition"
+              >
+                <Flag className="w-4 h-4 text-rose-400" /> <span>Report Node</span>
+              </button>
+
+              {(isCurrentRoomCreator || isAdmin) && (
+                <>
+                  <button
+                    onClick={() => setShowRoomStyleModal(true)}
+                    className="bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-500/30 text-xs px-3 py-2 rounded-xl flex items-center gap-1.5 font-bold transition"
+                  >
+                    <Palette className="w-4 h-4" /> <span>Room Style</span>
+                  </button>
+
+                  <button
+                    onClick={() => setShowReportDashboard(true)}
+                    className="bg-amber-950/40 hover:bg-amber-900/60 text-amber-300 border border-amber-500/30 text-xs px-3 py-2 rounded-xl flex items-center gap-1.5 font-bold transition"
+                  >
+                    <ShieldAlert className="w-4 h-4" /> <span>Reports ({reportsList.length})</span>
+                  </button>
+                </>
+              )}
+
               {isAdmin && (
                 <>
                   <button
@@ -605,7 +911,7 @@ export default function App() {
 
               <button
                 onClick={handleSignOut}
-                className="bg-rose-950/40 text-rose-300 border border-rose-500/30 text-xs px-3 py-2 rounded-xl flex items-center gap-1.5 font-bold"
+                className="bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs px-3 py-2 rounded-xl flex items-center gap-1.5 font-bold"
               >
                 <LogOut className="w-4 h-4" /> <span>Sign Out</span>
               </button>
@@ -678,9 +984,18 @@ export default function App() {
               )}
             </aside>
 
-            {/* MESSAGES FEED */}
-            <main className="flex-1 flex flex-col bg-slate-950 p-4 overflow-hidden relative">
-              <div className="flex-1 overflow-y-auto space-y-4 pr-2">
+            {/* MAIN MESSAGES FEED WITH DYNAMIC BACKDROP */}
+            <main 
+              className={`flex-1 flex flex-col p-4 overflow-hidden relative transition-all ${
+                currentStyle.type === 'color' ? currentStyle.value : ''
+              }`}
+              style={
+                currentStyle.type === 'image' 
+                  ? { backgroundImage: `url(${currentStyle.value})`, backgroundSize: 'cover', backgroundPosition: 'center' } 
+                  : {}
+              }
+            >
+              <div className="flex-1 overflow-y-auto space-y-4 pr-2 bg-slate-950/40 backdrop-blur-xs p-3 rounded-2xl">
                 {messages.map((m) => {
                   const isMe = m.userName === userName;
                   const isAction = m.userId === 'system_action';
@@ -689,7 +1004,7 @@ export default function App() {
                   if (isAction) {
                     return (
                       <div key={m.id} className="flex justify-center my-2">
-                        <div className="bg-cyan-950/40 border border-cyan-500/30 text-cyan-300 text-xs px-4 py-1.5 rounded-full font-bold">
+                        <div className="bg-cyan-950/60 border border-cyan-500/40 text-cyan-300 text-xs px-4 py-1.5 rounded-full font-bold shadow-lg">
                           {m.text}
                         </div>
                       </div>
@@ -698,7 +1013,7 @@ export default function App() {
 
                   return (
                     <div key={m.id} className={`flex gap-3 max-w-2xl ${isMe ? 'ml-auto flex-row-reverse' : ''}`}>
-                      <div className={`w-9 h-9 rounded-xl bg-gradient-to-tr ${m.userGradient || 'from-slate-700 to-slate-800'} flex items-center justify-center text-base shrink-0`}>
+                      <div className={`w-9 h-9 rounded-xl bg-gradient-to-tr ${m.userGradient || 'from-slate-700 to-slate-800'} flex items-center justify-center text-base shrink-0 shadow`}>
                         {m.userIcon || (isMsgAdmin ? '👑' : '⭐')}
                       </div>
                       <div className={`space-y-1 ${isMe ? 'items-end' : 'items-start'}`}>
@@ -711,7 +1026,7 @@ export default function App() {
 
                         <div className={`p-3.5 rounded-2xl text-sm ${
                           isMsgAdmin
-                            ? 'bg-amber-950/30 border border-amber-500/40 text-amber-100 shadow-md shadow-amber-500/5'
+                            ? 'bg-amber-950/40 border border-amber-500/50 text-amber-100 shadow-lg shadow-amber-500/10'
                             : isMe
                             ? 'bg-gradient-to-r from-cyan-600 to-indigo-600 text-white rounded-tr-none'
                             : 'bg-slate-900 border border-slate-800 text-slate-100 rounded-tl-none'
@@ -737,19 +1052,19 @@ export default function App() {
               </div>
 
               {/* INPUT BAR */}
-              <form onSubmit={handleSendMessage} className="mt-3 flex gap-2 relative">
+              <form onSubmit={handleSendMessage} className="mt-3 flex gap-2 relative z-10">
                 <input
                   type="text"
                   value={inputMessage}
                   onChange={(e) => setInputMessage(e.target.value)}
                   placeholder="Type your message..."
-                  className="flex-1 bg-slate-900 border border-slate-800 focus:border-cyan-500 rounded-2xl px-4 py-3 text-slate-100 outline-none text-sm font-semibold"
+                  className="flex-1 bg-slate-900/90 border border-slate-800 focus:border-cyan-500 rounded-2xl px-4 py-3 text-slate-100 outline-none text-sm font-semibold backdrop-blur-md"
                 />
 
                 <button
                   type="button"
                   onClick={() => setShowMediaModal(!showMediaModal)}
-                  className="p-3 bg-slate-900 border border-slate-800 text-slate-400 hover:text-cyan-400 rounded-2xl"
+                  className="p-3 bg-slate-900/90 border border-slate-800 text-slate-400 hover:text-cyan-400 rounded-2xl backdrop-blur-md"
                 >
                   <ImageIcon className="w-5 h-5" />
                 </button>
@@ -757,7 +1072,7 @@ export default function App() {
                 <button
                   type="submit"
                   disabled={!inputMessage.trim() && !mediaUrlInput.trim()}
-                  className="px-5 bg-gradient-to-r from-cyan-500 to-indigo-600 disabled:opacity-50 text-white font-extrabold rounded-2xl flex items-center justify-center"
+                  className="px-5 bg-gradient-to-r from-cyan-500 to-indigo-600 disabled:opacity-50 text-white font-extrabold rounded-2xl flex items-center justify-center shadow-lg"
                 >
                   <Send className="w-5 h-5" />
                 </button>
