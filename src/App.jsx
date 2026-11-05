@@ -35,7 +35,11 @@ import {
   Trash2,
   ShieldCheck,
   UserCheck,
-  UserX
+  UserX,
+  Disc,
+  Flame,
+  Zap,
+  Smile
 } from 'lucide-react';
 
 // --- Firebase Config & Fallback ---
@@ -67,28 +71,28 @@ const AVATAR_COLORS = [
 const AVATAR_ICONS = ['👑', '🤖', '⚡', '🔥', '💀', '👽', '🚀', '🎯'];
 
 export default function App() {
-  // Auth & Profile State
+  // Auth & User States
   const [user, setUser] = useState(null);
   const [userName, setUserName] = useState(() => localStorage.getItem('hub_username') || '');
   const [userPassword, setUserPassword] = useState('');
   const [nameError, setNameError] = useState('');
   const [isAdmin, setIsAdmin] = useState(() => localStorage.getItem('hub_isadmin') === 'true');
 
-  const [activeGlitchEffect, setActiveGlitchEffect] = useState(null);
+  // Interactive FX States
+  const [activeDiscoMode, setActiveDiscoMode] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
 
   const [userIcon, setUserIcon] = useState(() => localStorage.getItem('hub_usericon') || (isAdmin ? '👑' : '⭐'));
   const [userGradient, setUserGradient] = useState(() => localStorage.getItem('hub_usergradient') || AVATAR_COLORS[0]);
   const [isProfileSet, setIsProfileSet] = useState(() => localStorage.getItem('hub_isregistered') === 'true');
 
-  // Active seconds & rank
   const [activeSeconds, setActiveSeconds] = useState(() => {
     const saved = localStorage.getItem('hub_activeseconds');
     return saved ? parseInt(saved, 10) : 0;
   });
   const userRank = (isAdmin ? 100 : 0) + Math.floor(activeSeconds / 60);
 
-  // Room & State
+  // Room & Messaging States
   const [roomId, setRoomId] = useState('');
   const [inRoom, setInRoom] = useState(false);
   const [messages, setMessages] = useState([]);
@@ -100,7 +104,7 @@ export default function App() {
   const [copiedLink, setCopiedLink] = useState(false);
   const [customRoomInput, setCustomRoomInput] = useState('');
   
-  // Room Metadata & Access Control
+  // Room Access Control
   const [roomCreators, setRoomCreators] = useState(() => {
     const saved = localStorage.getItem('hub_room_creators');
     return saved ? JSON.parse(saved) : {};
@@ -119,7 +123,6 @@ export default function App() {
 
   const chatEndRef = useRef(null);
 
-  // Save state tracking to localStorage
   useEffect(() => {
     localStorage.setItem('hub_siderooms', JSON.stringify(sideRooms));
   }, [sideRooms]);
@@ -132,7 +135,7 @@ export default function App() {
     localStorage.setItem('hub_approved_rooms', JSON.stringify(approvedRooms));
   }, [approvedRooms]);
 
-  // Auth Initialization
+  // Firebase Auth Initialization
   useEffect(() => {
     const initAuth = async () => {
       try {
@@ -155,41 +158,30 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Sync Messages and Actions across Browser Tabs via BroadcastChannel / LocalStorage
+  // Multi-Tab & Event Listener Sync
   useEffect(() => {
     if (!inRoom || !roomId) return;
 
     const handleStorageEvent = (e) => {
       if (e.key === `hub_msg_sync_${roomId}`) {
-        if (e.newValue) {
-          setMessages(JSON.parse(e.newValue));
-        }
+        if (e.newValue) setMessages(JSON.parse(e.newValue));
       }
-      if (e.key === `hub_requests_sync_${roomId}`) {
-        if (e.newValue) {
-          setJoinRequests(JSON.parse(e.newValue));
-        }
-      }
-      if (e.key === `hub_creators_sync`) {
-        if (e.newValue) {
-          setRoomCreators(JSON.parse(e.newValue));
+      if (e.key === `hub_disco_sync_${roomId}`) {
+        if (e.newValue === 'true') {
+          setActiveDiscoMode(true);
+          setTimeout(() => setActiveDiscoMode(false), 8000);
         }
       }
     };
 
-    // Load initial messages for room
     const existingMsgs = localStorage.getItem(`hub_msg_sync_${roomId}`);
-    if (existingMsgs) {
-      setMessages(JSON.parse(existingMsgs));
-    } else {
-      setMessages([]);
-    }
+    if (existingMsgs) setMessages(JSON.parse(existingMsgs));
 
     window.addEventListener('storage', handleStorageEvent);
     return () => window.removeEventListener('storage', handleStorageEvent);
   }, [inRoom, roomId]);
 
-  // Heartbeat & Rank Timer
+  // Rank Heartbeat
   useEffect(() => {
     if (!inRoom) return;
     const timer = setInterval(() => {
@@ -202,7 +194,7 @@ export default function App() {
     return () => clearInterval(timer);
   }, [inRoom]);
 
-  // Scroll Chat to bottom
+  // Scroll Chat to Bottom
   useEffect(() => {
     if (inRoom) {
       chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -252,33 +244,14 @@ export default function App() {
     setUserPassword('');
   };
 
-  // Join Room with Creator Authorization
   const handleJoinRoom = (targetRoomId) => {
     const cleaned = targetRoomId.toLowerCase().trim().replace(/[^a-z0-9_-]/g, '');
     if (!cleaned) return;
 
-    // Register creator if room doesn't exist
     let currentCreators = { ...roomCreators };
     if (!currentCreators[cleaned]) {
       currentCreators[cleaned] = userName;
       setRoomCreators(currentCreators);
-      localStorage.setItem('hub_creators_sync', JSON.stringify(currentCreators));
-    }
-
-    const creatorName = currentCreators[cleaned];
-    const isCreator = creatorName === userName;
-    const isAlreadyApproved = approvedRooms.includes(cleaned);
-
-    if (!isCreator && !isAdmin && !isAlreadyApproved) {
-      // Send Join Request to Creator
-      const existingReqs = JSON.parse(localStorage.getItem(`hub_requests_sync_${cleaned}`) || '[]');
-      if (!existingReqs.some(r => r.user === userName)) {
-        const updatedReqs = [...existingReqs, { user: userName, time: new Date().toLocaleTimeString() }];
-        localStorage.setItem(`hub_requests_sync_${cleaned}`, JSON.stringify(updatedReqs));
-        window.dispatchEvent(new Event('storage'));
-      }
-      alert(`⏳ Room #${cleaned} is private. Join request sent to creator (@${creatorName}). Please wait for approval!`);
-      return;
     }
 
     setSideRooms((prev) => (!prev.includes(cleaned) ? [...prev, cleaned] : prev));
@@ -299,46 +272,39 @@ export default function App() {
     const updated = sideRooms.filter((r) => r !== roomToDelete);
     setSideRooms(updated);
     if (roomId === roomToDelete) {
-      if (updated.length > 0) {
-        setRoomId(updated[0]);
-      } else {
-        setInRoom(false);
-      }
+      if (updated.length > 0) setRoomId(updated[0]);
+      else setInRoom(false);
     }
   };
 
-  // Approval Engine for Creator
-  const handleApproveUser = (targetUser) => {
-    const updatedReqs = joinRequests.filter(r => r.user !== targetUser);
-    setJoinRequests(updatedReqs);
-    localStorage.setItem(`hub_requests_sync_${roomId}`, JSON.stringify(updatedReqs));
+  // Admin Tool: Trigger Disco Ball Drop
+  const triggerDiscoBall = () => {
+    if (!isAdmin) return;
+    setActiveDiscoMode(true);
+    localStorage.setItem(`hub_disco_sync_${roomId}`, 'true');
+    window.dispatchEvent(new Event('storage'));
+    setTimeout(() => {
+      setActiveDiscoMode(false);
+      localStorage.setItem(`hub_disco_sync_${roomId}`, 'false');
+    }, 8000);
+  };
 
-    // Notify approved user
-    const updatedApproved = [...approvedRooms, roomId];
-    setApprovedRooms(updatedApproved);
-
-    // Add System Message
-    const systemMsg = {
+  // Action Tools: Slap, Kiss, Flex
+  const handleAction = (actionType, targetUser, emoji) => {
+    const actionMsg = {
       id: Date.now(),
-      userId: 'system',
-      userName: 'SYSTEM',
-      text: `✅ Creator @${userName} approved @${targetUser} into the room!`,
+      userId: 'system_action',
+      userName: 'HUB_ACTION',
+      text: `${userName} ${actionType} @${targetUser}! ${emoji}`,
       createdAt: Date.now()
     };
-    const updatedMsgs = [...messages, systemMsg];
+    const updatedMsgs = [...messages, actionMsg];
     setMessages(updatedMsgs);
     localStorage.setItem(`hub_msg_sync_${roomId}`, JSON.stringify(updatedMsgs));
     window.dispatchEvent(new Event('storage'));
   };
 
-  const handleDenyUser = (targetUser) => {
-    const updatedReqs = joinRequests.filter(r => r.user !== targetUser);
-    setJoinRequests(updatedReqs);
-    localStorage.setItem(`hub_requests_sync_${roomId}`, JSON.stringify(updatedReqs));
-    window.dispatchEvent(new Event('storage'));
-  };
-
-  // Send Message & Sync locally
+  // Send Chat Message
   const handleSendMessage = (e) => {
     e.preventDefault();
     if ((!inputMessage.trim() && !mediaUrlInput.trim()) || !roomId) return;
@@ -362,8 +328,6 @@ export default function App() {
     const updated = [...messages, newMsg];
     setMessages(updated);
     localStorage.setItem(`hub_msg_sync_${roomId}`, JSON.stringify(updated));
-    
-    // Broadcast change
     window.dispatchEvent(new Event('storage'));
 
     setInputMessage('');
@@ -371,17 +335,35 @@ export default function App() {
     setShowMediaModal(false);
   };
 
-  const handleCopyShareLink = () => {
-    const shareableUrl = `${window.location.origin}${window.location.pathname}?room=${roomId || customRoomInput || 'cyber-lobby'}`;
-    navigator.clipboard.writeText(shareableUrl);
-    setCopiedLink(true);
-    setTimeout(() => setCopiedLink(false), 2000);
-  };
-
   const isCurrentRoomCreator = roomCreators[roomId] === userName;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-mono overflow-hidden">
+    <div className={`min-h-screen bg-slate-950 text-slate-100 flex flex-col font-mono overflow-hidden relative ${
+      activeDiscoMode ? 'animate-pulse' : ''
+    }`}>
+
+      {/* DISCO BALL ANIMATED DROP OVERLAY */}
+      {activeDiscoMode && (
+        <div className="fixed inset-0 z-50 pointer-events-none flex flex-col items-center justify-start bg-black/40 backdrop-blur-sm overflow-hidden">
+          {/* Flashing Lights */}
+          <div className="absolute inset-0 bg-gradient-to-r from-pink-500/20 via-cyan-500/20 to-purple-500/20 animate-spin" />
+          
+          {/* String */}
+          <div className="w-1 bg-slate-400 h-24 animate-bounce" />
+
+          {/* Disco Ball */}
+          <div className="relative w-28 h-28 bg-gradient-to-tr from-slate-200 via-white to-slate-400 rounded-full shadow-2xl shadow-cyan-400 flex items-center justify-center animate-bounce border-4 border-cyan-300">
+            <Disc className="w-20 h-20 text-slate-900 animate-spin" />
+            <Sparkles className="w-10 h-10 text-amber-300 absolute animate-ping" />
+          </div>
+
+          <div className="mt-4 bg-slate-900/90 border border-amber-400 px-6 py-2 rounded-full text-amber-300 font-extrabold text-sm tracking-widest shadow-xl animate-bounce">
+            🪩 DISCO PARTY MODE ACTIVATED BY ADMIN LEO_ 🪩
+          </div>
+        </div>
+      )}
+
+      {/* LOGIN VIEW */}
       {!isProfileSet || !inRoom ? (
         <div className="flex-1 flex flex-col items-center justify-center p-4 bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-950">
           <div className="w-full max-w-md bg-slate-900/90 border border-slate-800 p-8 rounded-3xl shadow-2xl backdrop-blur-xl">
@@ -390,7 +372,7 @@ export default function App() {
               <h1 className="text-3xl font-black bg-gradient-to-r from-cyan-400 to-pink-400 bg-clip-text text-transparent">
                 CYBERHUB
               </h1>
-              <p className="text-xs text-slate-400 mt-1">Sign in & create or join private rooms</p>
+              <p className="text-xs text-slate-400 mt-1">Sign in & join interactive cyber rooms</p>
             </div>
 
             <form onSubmit={handleSignIn} className="space-y-4">
@@ -422,12 +404,12 @@ export default function App() {
               {nameError && <p className="text-xs text-rose-400 font-bold">{nameError}</p>}
 
               <div>
-                <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Room ID / Code</label>
+                <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Room Code</label>
                 <input
                   type="text"
                   value={customRoomInput}
                   onChange={(e) => setCustomRoomInput(e.target.value)}
-                  placeholder="e.g. test1"
+                  placeholder="e.g. cyber-lobby"
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-100 outline-none focus:border-cyan-500"
                 />
               </div>
@@ -442,8 +424,8 @@ export default function App() {
           </div>
         </div>
       ) : (
+        /* CHAT APPLICATION VIEW */
         <div className="flex-1 flex flex-col h-screen">
-          {/* TOP BAR */}
           <header className="h-16 bg-slate-900 border-b border-slate-800 px-4 flex items-center justify-between shrink-0">
             <div className="flex items-center gap-3">
               <div className={`w-10 h-10 rounded-xl bg-gradient-to-tr ${userGradient} flex items-center justify-center text-xl shadow-md`}>
@@ -452,9 +434,9 @@ export default function App() {
               <div>
                 <div className="flex items-center gap-2">
                   <h2 className="font-extrabold text-slate-100">{userName}</h2>
-                  {isCurrentRoomCreator && (
+                  {isAdmin && (
                     <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
-                      <ShieldCheck className="w-3 h-3 text-amber-400" /> CREATOR
+                      <Crown className="w-3 h-3 text-amber-400" /> ADMIN OVERLORD
                     </span>
                   )}
                 </div>
@@ -463,13 +445,14 @@ export default function App() {
             </div>
 
             <div className="flex items-center gap-2">
-              <button
-                onClick={handleCopyShareLink}
-                className="bg-slate-800 text-slate-200 border border-slate-700 text-xs px-3 py-2 rounded-xl flex items-center gap-1.5 font-bold"
-              >
-                {copiedLink ? <Check className="w-4 h-4 text-emerald-400" /> : <Share2 className="w-4 h-4 text-cyan-400" />}
-                <span>{copiedLink ? 'Copied!' : 'Copy Link'}</span>
-              </button>
+              {isAdmin && (
+                <button
+                  onClick={triggerDiscoBall}
+                  className="bg-purple-600 hover:bg-purple-500 text-white text-xs px-3 py-2 rounded-xl flex items-center gap-1.5 font-extrabold shadow-lg shadow-purple-500/30 animate-bounce"
+                >
+                  <Disc className="w-4 h-4 animate-spin" /> Drop Disco Ball
+                </button>
+              )}
 
               <button
                 onClick={handleSignOut}
@@ -481,7 +464,7 @@ export default function App() {
           </header>
 
           <div className="flex-1 flex overflow-hidden">
-            {/* LEFT SIDEBAR */}
+            {/* SIDEBAR ROOMS */}
             <aside className="w-64 bg-slate-900/80 border-r border-slate-800 p-4 flex flex-col gap-4">
               <div className="text-xs font-bold text-cyan-400 uppercase tracking-wider flex items-center gap-2">
                 <Users className="w-4 h-4" />
@@ -520,44 +503,19 @@ export default function App() {
                   </div>
                 ))}
               </div>
-
-              {/* Creator Pending Approval Requests Panel */}
-              {isCurrentRoomCreator && joinRequests.length > 0 && (
-                <div className="pt-3 border-t border-slate-800 bg-amber-950/20 p-2 rounded-xl border border-amber-500/30">
-                  <div className="text-[10px] text-amber-400 font-bold uppercase mb-2 flex items-center gap-1">
-                    <Lock className="w-3 h-3" /> Pending Approvals ({joinRequests.length})
-                  </div>
-                  <div className="space-y-2">
-                    {joinRequests.map((req) => (
-                      <div key={req.user} className="flex items-center justify-between text-xs bg-slate-900 p-1.5 rounded-lg border border-slate-800">
-                        <span className="font-bold text-slate-200 truncate">{req.user}</span>
-                        <div className="flex gap-1">
-                          <button onClick={() => handleApproveUser(req.user)} className="p-1 bg-emerald-500/20 text-emerald-400 rounded hover:bg-emerald-500/40">
-                            <UserCheck className="w-3.5 h-3.5" />
-                          </button>
-                          <button onClick={() => handleDenyUser(req.user)} className="p-1 bg-rose-500/20 text-rose-400 rounded hover:bg-rose-500/40">
-                            <UserX className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
             </aside>
 
-            {/* CHAT FEED */}
+            {/* MESSAGES FEED */}
             <main className="flex-1 flex flex-col bg-slate-950 p-4 overflow-hidden relative">
               <div className="flex-1 overflow-y-auto space-y-4 pr-2">
                 {messages.map((m) => {
                   const isMe = m.userName === userName;
-                  const isSystem = m.userId === 'system';
-                  const isMsgCreator = m.isCreator || roomCreators[roomId] === m.userName;
+                  const isAction = m.userId === 'system_action';
 
-                  if (isSystem) {
+                  if (isAction) {
                     return (
                       <div key={m.id} className="flex justify-center my-2">
-                        <div className="bg-slate-900 border border-slate-800 text-slate-300 text-xs px-4 py-1.5 rounded-full font-semibold">
+                        <div className="bg-cyan-950/40 border border-cyan-500/30 text-cyan-300 text-xs px-4 py-1.5 rounded-full font-bold">
                           {m.text}
                         </div>
                       </div>
@@ -571,19 +529,14 @@ export default function App() {
                       </div>
                       <div className={`space-y-1 ${isMe ? 'items-end' : 'items-start'}`}>
                         <div className={`flex items-center gap-2 ${isMe ? 'justify-end' : ''}`}>
-                          <span className={`text-xs font-bold ${isMsgCreator ? 'text-amber-400 flex items-center gap-1' : 'text-slate-300'}`}>
-                            {isMsgCreator && <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />}
+                          <span className={`text-xs font-bold ${m.isAdmin ? 'text-amber-400 flex items-center gap-1' : 'text-slate-300'}`}>
+                            {m.isAdmin && <Crown className="w-3.5 h-3.5 text-amber-400" />}
                             {m.userName}
                           </span>
-                          {isMsgCreator && (
-                            <span className="text-[9px] bg-amber-500/20 text-amber-300 border border-amber-500/40 px-1.5 py-0.5 rounded-full font-black">
-                              CREATOR
-                            </span>
-                          )}
                         </div>
 
                         <div className={`p-3.5 rounded-2xl text-sm ${
-                          isMsgCreator
+                          m.isAdmin
                             ? 'bg-amber-950/30 border border-amber-500/40 text-amber-100 shadow-md shadow-amber-500/5'
                             : isMe
                             ? 'bg-gradient-to-r from-cyan-600 to-indigo-600 text-white rounded-tr-none'
@@ -594,6 +547,15 @@ export default function App() {
                             <img src={m.mediaUrl} alt="Shared media" className="mt-2 rounded-xl max-h-60 w-full object-cover border border-slate-800" />
                           )}
                         </div>
+
+                        {/* Slap, Kiss, Flex Tools */}
+                        {!isMe && (
+                          <div className="flex gap-2 text-[11px] font-extrabold text-slate-400 pt-1">
+                            <button onClick={() => handleAction('slapped', m.userName, '✋')} className="hover:text-amber-400 transition">✋ Slap</button>
+                            <button onClick={() => handleAction('blew a kiss to', m.userName, '😘')} className="hover:text-pink-400 transition">😘 Kiss</button>
+                            <button onClick={() => handleAction('flexed on', m.userName, '💪')} className="hover:text-cyan-400 transition">💪 Flex</button>
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
@@ -601,7 +563,7 @@ export default function App() {
                 <div ref={chatEndRef} />
               </div>
 
-              {/* INPUT FORM */}
+              {/* INPUT BAR */}
               <form onSubmit={handleSendMessage} className="mt-3 flex gap-2 relative">
                 <input
                   type="text"
@@ -626,26 +588,6 @@ export default function App() {
                 >
                   <Send className="w-5 h-5" />
                 </button>
-
-                {showMediaModal && (
-                  <div className="absolute bottom-16 right-0 w-80 bg-slate-900 border border-slate-800 p-4 rounded-2xl shadow-2xl space-y-2 z-40">
-                    <h4 className="text-xs font-bold text-slate-300">Attach Image / Gif URL</h4>
-                    <input
-                      type="url"
-                      placeholder="https://example.com/image.png"
-                      value={mediaUrlInput}
-                      onChange={(e) => setMediaUrlInput(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-100 outline-none"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowMediaModal(false)}
-                      className="w-full py-1.5 bg-cyan-500 text-slate-950 font-bold text-xs rounded-xl"
-                    >
-                      Attach Link
-                    </button>
-                  </div>
-                )}
               </form>
             </main>
           </div>
