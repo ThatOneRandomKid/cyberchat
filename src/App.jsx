@@ -12,8 +12,7 @@ import {
   doc,
   setDoc,
   getDoc,
-  onSnapshot,
-  updateDoc
+  onSnapshot
 } from 'firebase/firestore';
 import {
   Send,
@@ -36,7 +35,8 @@ import {
   Palette,
   ShieldAlert,
   Upload,
-  Ban
+  Ban,
+  LogIn as JoinIcon
 } from 'lucide-react';
 
 const firebaseConfig = typeof __firebase_config !== 'undefined'
@@ -83,7 +83,6 @@ const getRankIcon = (rank, isAdmin) => {
 };
 
 export default function App() {
-  // Auth & Profile State
   const [user, setUser] = useState(null);
   const [userName, setUserName] = useState(() => localStorage.getItem('hub_username') || '');
   const [userPassword, setUserPassword] = useState('');
@@ -92,7 +91,6 @@ export default function App() {
   const [userGradient, setUserGradient] = useState(ALL_COLOR_GRADIENTS[0]);
   const [isProfileSet, setIsProfileSet] = useState(() => localStorage.getItem('hub_isregistered') === 'true');
 
-  // Harder Rank Engine: 300 Seconds (5 Min) = 1 Rank Level
   const [activeSeconds, setActiveSeconds] = useState(() => {
     const saved = localStorage.getItem('hub_activeseconds');
     return saved ? parseInt(saved, 10) : 0;
@@ -101,7 +99,6 @@ export default function App() {
   const userRank = (isAdmin ? 100 : 0) + Math.floor(activeSeconds / 300);
   const currentBadgeIcon = getRankIcon(userRank, isAdmin);
 
-  // Room & Special FX States
   const [roomId, setRoomId] = useState('');
   const [inRoom, setInRoom] = useState(false);
   const [isWaitingForApproval, setIsWaitingForApproval] = useState(false);
@@ -114,32 +111,27 @@ export default function App() {
   const [activeDiscoMode, setActiveDiscoMode] = useState(false);
   const [activeMatrixMode, setActiveMatrixMode] = useState(false);
 
-  // Modals
   const [showReportModal, setShowReportModal] = useState(false);
   const [showRoomStyleModal, setShowRoomStyleModal] = useState(false);
   const [showReportDashboard, setShowReportDashboard] = useState(false);
   const [showBanModal, setShowBanModal] = useState(false);
 
-  // Form Inputs
   const [reportTargetUser, setReportTargetUser] = useState('');
   const [reportReason, setReportReason] = useState('');
   const [reportScreenshotUrl, setReportScreenshotUrl] = useState('');
   const [banUserInput, setBanUserInput] = useState('');
 
-  // Room Custom Styling States
   const [roomStyles, setRoomStyles] = useState(() => {
     const saved = localStorage.getItem('hub_room_styles');
     return saved ? JSON.parse(saved) : {};
   });
 
-  // Global Reports & Bans Store
   const [reportsList, setReportsList] = useState([]);
   const [bannedList, setBannedList] = useState(() => {
     const saved = localStorage.getItem('hub_banned_users');
     return saved ? JSON.parse(saved) : {};
   });
 
-  // Room Creators & Approval Storage
   const [roomCreators, setRoomCreators] = useState(() => {
     const saved = localStorage.getItem('hub_room_creators');
     return saved ? JSON.parse(saved) : {};
@@ -179,7 +171,6 @@ export default function App() {
     localStorage.setItem('hub_banned_users', JSON.stringify(bannedList));
   }, [bannedList]);
 
-  // Firebase Auth Initialization
   useEffect(() => {
     const initAuth = async () => {
       try {
@@ -202,7 +193,6 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Sync Room Data and FX
   useEffect(() => {
     if (!roomId) return;
 
@@ -270,7 +260,6 @@ export default function App() {
     return () => window.removeEventListener('storage', handleStorageEvent);
   }, [roomId, userName, sideRooms, bannedList, isAdmin]);
 
-  // Rank Heartbeat
   useEffect(() => {
     if (!inRoom) return;
     const timer = setInterval(() => {
@@ -283,33 +272,21 @@ export default function App() {
     return () => clearInterval(timer);
   }, [inRoom]);
 
-  // Scroll Chat
   useEffect(() => {
     if (inRoom) chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, inRoom]);
 
-  // Global Cross-Device Firebase Firestore Authentication
+  // Firebase Firestore Cross-Device Profile Authentication
   const handleSignIn = async (e) => {
     e.preventDefault();
     setNameError('');
 
     const cleanName = userName.trim();
-    if (!cleanName) {
-      setNameError('Please enter a valid display name.');
-      return;
-    }
+    if (!cleanName) return setNameError('Please enter a valid display name.');
+    if (!userPassword.trim()) return setNameError('Password is required.');
 
-    if (!userPassword.trim()) {
-      setNameError('Password is required for account verification.');
-      return;
-    }
-
-    // Admin Account Verification
     if (cleanName === 'LEO_') {
-      if (userPassword !== 'password') {
-        setNameError('Incorrect admin password for LEO_.');
-        return;
-      }
+      if (userPassword !== 'password') return setNameError('Incorrect admin password for LEO_.');
       setIsAdmin(true);
       setUserGradient('from-amber-400 to-orange-600');
       localStorage.setItem('hub_isadmin', 'true');
@@ -318,20 +295,17 @@ export default function App() {
       localStorage.setItem('hub_isadmin', 'false');
 
       try {
-        // Query Global Firebase Firestore Accounts
         const userDocRef = doc(db, 'users', cleanName.toLowerCase());
         const userSnap = await getDoc(userDocRef);
 
         if (userSnap.exists()) {
           const userData = userSnap.data();
           if (userData.password !== userPassword) {
-            setNameError('Incorrect password for this username on Cyberhub!');
-            return;
+            return setNameError('Incorrect password for this username!');
           }
           if (userData.gradient) setUserGradient(userData.gradient);
           if (userData.activeSeconds) setActiveSeconds(userData.activeSeconds);
         } else {
-          // Register New Global Account in Firestore
           const randomGrad = ALL_COLOR_GRADIENTS[Math.floor(Math.random() * ALL_COLOR_GRADIENTS.length)];
           setUserGradient(randomGrad);
           await setDoc(userDocRef, {
@@ -343,7 +317,7 @@ export default function App() {
           });
         }
       } catch (err) {
-        console.warn("Firestore Auth Fallback Mode Active:", err);
+        console.warn("Firestore Auth Fallback Active:", err);
       }
     }
 
@@ -1006,23 +980,28 @@ export default function App() {
           </header>
 
           <div className="flex-1 flex overflow-hidden">
-            {/* SIDEBAR ROOMS */}
+            {/* SIDEBAR ROOMS WITH JOIN BUTTON */}
             <aside className="w-64 bg-slate-900/80 border-r border-slate-800 p-4 flex flex-col gap-4">
               <div className="text-xs font-bold text-cyan-400 uppercase tracking-wider flex items-center gap-2">
                 <Users className="w-4 h-4" />
                 <span>My Cyber Rooms</span>
               </div>
 
+              {/* Sidebar New Room Code & Join Button */}
               <form onSubmit={handleAddSidebarRoom} className="flex gap-2">
                 <input
                   type="text"
-                  placeholder="New room..."
+                  placeholder="Join room code..."
                   value={newSidebarRoom}
                   onChange={(e) => setNewSidebarRoom(e.target.value)}
-                  className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-white outline-none"
+                  className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-white outline-none focus:border-cyan-400"
                 />
-                <button type="submit" className="bg-cyan-500 text-slate-950 p-1.5 rounded-xl font-bold">
-                  <Plus className="w-4 h-4" />
+                <button
+                  type="submit"
+                  className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 px-2.5 py-1.5 rounded-xl font-extrabold text-xs flex items-center gap-1 shrink-0"
+                  title="Join Room"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Join
                 </button>
               </form>
 
