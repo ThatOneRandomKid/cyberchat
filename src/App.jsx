@@ -35,7 +35,9 @@ import {
   Upload,
   Ban,
   LogIn as JoinIcon,
-  RotateCcw
+  RotateCcw,
+  Loader2,
+  Cpu
 } from 'lucide-react';
 
 const firebaseConfig = typeof __firebase_config !== 'undefined'
@@ -65,11 +67,12 @@ const ALL_COLOR_GRADIENTS = [
   'from-sky-400 to-indigo-600'
 ];
 
-const ROOM_BACKGROUND_PRESETS = [
-  { label: 'Deep Cyber', value: 'bg-slate-950' },
-  { label: 'Neon Void', value: 'bg-gradient-to-br from-purple-950 via-slate-950 to-indigo-950' },
-  { label: 'Matrix Grid', value: 'bg-gradient-to-br from-emerald-950 via-slate-950 to-teal-950' },
-  { label: 'Solar Flare', value: 'bg-gradient-to-br from-amber-950 via-slate-950 to-rose-950' }
+const ROOM_THEMES = [
+  { id: 'cyber', label: 'Cyber Cyan', value: 'bg-slate-950 border-cyan-500/30' },
+  { id: 'neon', label: 'Neon Void', value: 'bg-gradient-to-br from-purple-950 via-slate-950 to-indigo-950' },
+  { id: 'matrix', label: 'Emerald Matrix', value: 'bg-gradient-to-br from-emerald-950 via-slate-950 to-teal-950' },
+  { id: 'solar', label: 'Solar Flare', value: 'bg-gradient-to-br from-amber-950 via-slate-950 to-rose-950' },
+  { id: 'deepspace', label: 'Deep Space', value: 'bg-gradient-to-br from-slate-950 via-blue-950 to-slate-950' }
 ];
 
 const getRankIcon = (rank, isAdmin) => {
@@ -89,6 +92,7 @@ export default function App() {
   const [isAdmin, setIsAdmin] = useState(() => localStorage.getItem('hub_isadmin') === 'true');
   const [userGradient, setUserGradient] = useState(ALL_COLOR_GRADIENTS[0]);
   const [isProfileSet, setIsProfileSet] = useState(() => localStorage.getItem('hub_isregistered') === 'true');
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
 
   const [activeSeconds, setActiveSeconds] = useState(() => {
     const saved = localStorage.getItem('hub_activeseconds');
@@ -152,6 +156,22 @@ export default function App() {
   });
 
   const chatEndRef = useRef(null);
+
+  // Dynamic Browser Tab Favicon & Title Setter
+  useEffect(() => {
+    document.title = inRoom && roomId ? `CyberHub | #${roomId}` : `CyberHub - Interactive Rooms`;
+    
+    let faviconLink = document.querySelector("link[rel*='icon']");
+    if (!faviconLink) {
+      faviconLink = document.createElement('link');
+      faviconLink.rel = 'shortcut icon';
+      document.getElementsByTagName('head')[0].appendChild(faviconLink);
+    }
+    
+    // Glowing Cyber Logo SVG Favicon
+    const svgIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="25" fill="%230f172a"/><path d="M50 20L80 40V70L50 90L20 70V40Z" fill="none" stroke="%2306b6d4" stroke-width="8"/><circle cx="50" cy="50" r="12" fill="%23ec4899"/></svg>`;
+    faviconLink.href = `data:image/svg+xml,${svgIcon}`;
+  }, [inRoom, roomId]);
 
   useEffect(() => {
     localStorage.setItem('hub_siderooms', JSON.stringify(sideRooms));
@@ -278,7 +298,6 @@ export default function App() {
     if (inRoom) chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, inRoom]);
 
-  // Master System Reset: Clears out all old accounts, ghost creators, and room requests
   const handleMasterSystemReset = () => {
     if (window.confirm("⚠️ Are you sure you want to PURGE ALL previous rooms, accounts, and ghost requests? This will completely clean Cyberhub.")) {
       localStorage.clear();
@@ -305,48 +324,57 @@ export default function App() {
     if (!cleanName) return setNameError('Please enter a valid display name.');
     if (!userPassword.trim()) return setNameError('Password is required.');
 
-    if (cleanName === 'LEO_') {
-      if (userPassword !== 'password') return setNameError('Incorrect admin password for LEO_.');
-      setIsAdmin(true);
-      setUserGradient('from-amber-400 to-orange-600');
-      localStorage.setItem('hub_isadmin', 'true');
-    } else {
-      setIsAdmin(false);
-      localStorage.setItem('hub_isadmin', 'false');
+    setIsAuthenticating(true);
 
-      try {
-        const userDocRef = doc(db, 'users', cleanName.toLowerCase());
-        const userSnap = await getDoc(userDocRef);
-
-        if (userSnap.exists()) {
-          const userData = userSnap.data();
-          if (userData.password !== userPassword) {
-            return setNameError('Incorrect password for this username!');
-          }
-          if (userData.gradient) setUserGradient(userData.gradient);
-          if (userData.activeSeconds) setActiveSeconds(userData.activeSeconds);
-        } else {
-          const randomGrad = ALL_COLOR_GRADIENTS[Math.floor(Math.random() * ALL_COLOR_GRADIENTS.length)];
-          setUserGradient(randomGrad);
-          await setDoc(userDocRef, {
-            username: cleanName,
-            password: userPassword,
-            gradient: randomGrad,
-            activeSeconds: activeSeconds,
-            createdAt: Date.now()
-          });
+    setTimeout(async () => {
+      if (cleanName === 'LEO_') {
+        if (userPassword !== 'password') {
+          setIsAuthenticating(false);
+          return setNameError('Incorrect admin password for LEO_.');
         }
-      } catch (err) {
-        console.warn("Firestore Auth Fallback Active:", err);
+        setIsAdmin(true);
+        setUserGradient('from-amber-400 to-orange-600');
+        localStorage.setItem('hub_isadmin', 'true');
+      } else {
+        setIsAdmin(false);
+        localStorage.setItem('hub_isadmin', 'false');
+
+        try {
+          const userDocRef = doc(db, 'users', cleanName.toLowerCase());
+          const userSnap = await getDoc(userDocRef);
+
+          if (userSnap.exists()) {
+            const userData = userSnap.data();
+            if (userData.password !== userPassword) {
+              setIsAuthenticating(false);
+              return setNameError('Incorrect password for this username!');
+            }
+            if (userData.gradient) setUserGradient(userData.gradient);
+            if (userData.activeSeconds) setActiveSeconds(userData.activeSeconds);
+          } else {
+            const randomGrad = ALL_COLOR_GRADIENTS[Math.floor(Math.random() * ALL_COLOR_GRADIENTS.length)];
+            setUserGradient(randomGrad);
+            await setDoc(userDocRef, {
+              username: cleanName,
+              password: userPassword,
+              gradient: randomGrad,
+              activeSeconds: activeSeconds,
+              createdAt: Date.now()
+            });
+          }
+        } catch (err) {
+          console.warn("Firestore Auth Fallback Active:", err);
+        }
       }
-    }
 
-    localStorage.setItem('hub_username', cleanName);
-    localStorage.setItem('hub_isregistered', 'true');
-    setIsProfileSet(true);
+      localStorage.setItem('hub_username', cleanName);
+      localStorage.setItem('hub_isregistered', 'true');
+      setIsProfileSet(true);
+      setIsAuthenticating(false);
 
-    const targetRoom = customRoomInput.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '') || 'cyber-lobby';
-    handleJoinOrCreateRoom(targetRoom, false, cleanName);
+      const targetRoom = customRoomInput.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '') || 'cyber-lobby';
+      handleJoinOrCreateRoom(targetRoom, false, cleanName);
+    }, 1500);
   };
 
   const handleSignOut = () => {
@@ -614,15 +642,28 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-mono overflow-hidden relative">
 
-      {/* DISCO OVERLAY */}
+      {/* FULL-SCREEN AUTHENTICATION LOADING PORTAL */}
+      {isAuthenticating && (
+        <div className="fixed inset-0 z-50 bg-slate-950/95 backdrop-blur-xl flex flex-col items-center justify-center p-6 text-center">
+          <div className="relative flex items-center justify-center mb-6">
+            <div className="w-24 h-24 border-4 border-cyan-500/20 border-t-cyan-400 rounded-full animate-spin" />
+            <div className="w-16 h-16 border-4 border-purple-500/20 border-b-purple-400 rounded-full animate-spin absolute" style={{ animationDirection: 'reverse' }} />
+            <Cpu className="w-8 h-8 text-cyan-400 absolute animate-pulse" />
+          </div>
+          <h2 className="text-2xl font-black text-cyan-400 tracking-wider mb-2 animate-pulse">AUTHENTICATING...</h2>
+          <p className="text-xs text-slate-400 font-mono max-w-xs">Verifying credentials and syncing global profile state across CyberHub grid.</p>
+        </div>
+      )}
+
+      {/* UPGRADED ULTRA DISCO MODE OVERLAY */}
       {activeDiscoMode && (
-        <div className="fixed inset-0 z-50 pointer-events-none flex flex-col items-center justify-start bg-black/50 backdrop-blur-sm overflow-hidden">
-          <div className="absolute inset-0 bg-gradient-to-r from-pink-500/30 via-cyan-500/30 to-amber-500/30 animate-pulse" />
-          <div className="absolute inset-0 bg-gradient-to-b from-purple-600/20 via-transparent to-pink-600/20 animate-spin" />
-          <div className="w-1 bg-gradient-to-b from-slate-200 to-slate-500 h-28 animate-bounce" />
-          <div className="relative w-36 h-36 bg-gradient-to-tr from-cyan-300 via-pink-300 to-amber-200 rounded-full shadow-[0_0_60px_rgba(6,182,212,0.8)] flex items-center justify-center animate-bounce border-4 border-white">
-            <Disc className="w-24 h-24 text-slate-950 animate-spin" />
-            <Sparkles className="w-12 h-12 text-amber-300 absolute animate-ping" />
+        <div className="fixed inset-0 z-50 pointer-events-none flex flex-col items-center justify-start bg-black/60 backdrop-blur-md overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-r from-pink-500/40 via-cyan-500/40 to-amber-500/40 animate-pulse" />
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-purple-900/40 via-transparent to-black animate-spin" />
+          <div className="w-1.5 bg-gradient-to-b from-white via-cyan-300 to-transparent h-32 animate-bounce" />
+          <div className="relative w-40 h-40 bg-gradient-to-tr from-cyan-300 via-pink-400 to-amber-300 rounded-full shadow-[0_0_80px_rgba(6,182,212,0.9)] flex items-center justify-center animate-bounce border-4 border-white">
+            <Disc className="w-28 h-28 text-slate-950 animate-spin" />
+            <Sparkles className="w-14 h-14 text-amber-300 absolute animate-ping" />
           </div>
           <div className="mt-6 bg-slate-900/90 border-2 border-amber-400 px-8 py-3 rounded-full text-amber-300 font-black text-base tracking-widest shadow-2xl animate-bounce flex items-center gap-2">
             <Sparkles className="w-5 h-5 text-amber-400 animate-spin" />
@@ -631,15 +672,15 @@ export default function App() {
         </div>
       )}
 
-      {/* MATRIX RAIN OVERLAY */}
+      {/* UPGRADED ULTRA MATRIX CODE RAIN OVERLAY */}
       {activeMatrixMode && (
         <div className="fixed inset-0 z-50 pointer-events-none bg-black/95 flex flex-col items-center justify-center p-6 text-center overflow-hidden">
-          <div className="absolute inset-0 opacity-60 font-mono text-emerald-400 text-xs leading-none overflow-hidden select-none whitespace-pre">
+          <div className="absolute inset-0 opacity-70 font-mono text-emerald-400 text-xs leading-none overflow-hidden select-none whitespace-pre">
             {`0101010101001010101010101010101010101010101010101010101010101\n` +
              `1010101010101010101010101010101010101010101010101010101010101\n` +
-             `01010101010101010101010101010101010101010101010101010101010101\n`.repeat(25)}
+             `01010101010101010101010101010101010101010101010101010101010101\n`.repeat(30)}
           </div>
-          <div className="z-10 bg-slate-900/90 border-2 border-emerald-400 p-8 rounded-3xl shadow-[0_0_50px_rgba(16,185,129,0.4)] max-w-md animate-pulse">
+          <div className="z-10 bg-slate-900/95 border-2 border-emerald-400 p-8 rounded-3xl shadow-[0_0_60px_rgba(16,185,129,0.5)] max-w-md animate-pulse">
             <Terminal className="w-16 h-16 text-emerald-400 mx-auto mb-3 animate-bounce" />
             <h3 className="text-2xl font-black text-emerald-400 tracking-wider mb-2">⚡ SYSTEM MATRIX OVERRIDE ⚡</h3>
             <p className="text-xs text-slate-300">Admin LEO_ injected live quantum code streams into grid node #{roomId}.</p>
@@ -758,27 +799,27 @@ export default function App() {
         </div>
       )}
 
-      {/* ROOM STYLING MODAL */}
+      {/* ROOM STYLING MODAL WITH DYNAMIC THEMES */}
       {showRoomStyleModal && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 w-full max-w-md rounded-3xl p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2 text-cyan-400 font-black">
-                <Palette className="w-5 h-5" /> Customize Room Backdrop
+                <Palette className="w-5 h-5" /> Customize Room Backdrop & Themes
               </div>
               <button onClick={() => setShowRoomStyleModal(false)} className="text-slate-400 hover:text-white font-bold">✕</button>
             </div>
 
             <div className="space-y-3">
-              <label className="block text-xs font-bold uppercase text-slate-400">Color Presets</label>
+              <label className="block text-xs font-bold uppercase text-slate-400">Theme Presets</label>
               <div className="grid grid-cols-2 gap-2">
-                {ROOM_BACKGROUND_PRESETS.map((preset) => (
+                {ROOM_THEMES.map((theme) => (
                   <button
-                    key={preset.label}
-                    onClick={() => handleUpdateRoomStyle(preset.value, false)}
+                    key={theme.id}
+                    onClick={() => handleUpdateRoomStyle(theme.value, false)}
                     className="p-3 rounded-xl bg-slate-950 border border-slate-800 hover:border-cyan-400 text-xs font-bold text-slate-200 text-left transition"
                   >
-                    {preset.label}
+                    {theme.label}
                   </button>
                 ))}
               </div>
@@ -985,7 +1026,6 @@ export default function App() {
                 </>
               )}
 
-              {/* STRICTLY ADMIN EXCLUSIVE BAN BUTTON */}
               {isAdmin && (
                 <>
                   <button
