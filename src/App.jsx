@@ -7,33 +7,31 @@ import {
   onAuthStateChanged
 } from 'firebase/auth';
 import {
-  getFirestore
+  getFirestore,
+  collection,
+  doc,
+  setDoc,
+  getDoc,
+  onSnapshot,
+  updateDoc
 } from 'firebase/firestore';
 import {
   Send,
-  Volume2,
-  VolumeX,
-  Check,
   Users,
-  MessageSquare,
   LogOut,
   Sparkles,
   Crown,
   Lock,
-  Share2,
   LogIn,
   Plus,
   Hash,
   ImageIcon,
   Trash2,
-  ShieldCheck,
   UserCheck,
   UserX,
   Disc,
   Clock,
   Terminal,
-  Zap,
-  Activity,
   Flag,
   Palette,
   ShieldAlert,
@@ -75,7 +73,6 @@ const ROOM_BACKGROUND_PRESETS = [
   { label: 'Solar Flare', value: 'bg-gradient-to-br from-amber-950 via-slate-950 to-rose-950' }
 ];
 
-// Crown is strictly restricted to Admin (LEO_)
 const getRankIcon = (rank, isAdmin) => {
   if (isAdmin) return '👑';
   if (rank >= 50) return '💎';
@@ -92,22 +89,8 @@ export default function App() {
   const [userPassword, setUserPassword] = useState('');
   const [nameError, setNameError] = useState('');
   const [isAdmin, setIsAdmin] = useState(() => localStorage.getItem('hub_isadmin') === 'true');
-
-  const [userGradient] = useState(() => {
-    const saved = localStorage.getItem('hub_usergradient');
-    if (saved) return saved;
-    const randomGrad = ALL_COLOR_GRADIENTS[Math.floor(Math.random() * ALL_COLOR_GRADIENTS.length)];
-    localStorage.setItem('hub_usergradient', randomGrad);
-    return randomGrad;
-  });
-
+  const [userGradient, setUserGradient] = useState(ALL_COLOR_GRADIENTS[0]);
   const [isProfileSet, setIsProfileSet] = useState(() => localStorage.getItem('hub_isregistered') === 'true');
-
-  // Account Password Vault Storage
-  const [userVault, setUserVault] = useState(() => {
-    const saved = localStorage.getItem('hub_user_vault');
-    return saved ? JSON.parse(saved) : {};
-  });
 
   // Harder Rank Engine: 300 Seconds (5 Min) = 1 Rank Level
   const [activeSeconds, setActiveSeconds] = useState(() => {
@@ -127,12 +110,11 @@ export default function App() {
   const [inputMessage, setInputMessage] = useState('');
   const [mediaUrlInput, setMediaUrlInput] = useState('');
   const [showMediaModal, setShowMediaModal] = useState(false);
-  const [copiedLink, setCopiedLink] = useState(false);
   const [customRoomInput, setCustomRoomInput] = useState('');
   const [activeDiscoMode, setActiveDiscoMode] = useState(false);
   const [activeMatrixMode, setActiveMatrixMode] = useState(false);
 
-  // Room Customization & Reporting Modals
+  // Modals
   const [showReportModal, setShowReportModal] = useState(false);
   const [showRoomStyleModal, setShowRoomStyleModal] = useState(false);
   const [showReportDashboard, setShowReportDashboard] = useState(false);
@@ -190,10 +172,6 @@ export default function App() {
   }, [approvedRooms]);
 
   useEffect(() => {
-    localStorage.setItem('hub_user_vault', JSON.stringify(userVault));
-  }, [userVault]);
-
-  useEffect(() => {
     localStorage.setItem('hub_room_styles', JSON.stringify(roomStyles));
   }, [roomStyles]);
 
@@ -201,7 +179,7 @@ export default function App() {
     localStorage.setItem('hub_banned_users', JSON.stringify(bannedList));
   }, [bannedList]);
 
-  // Auth Initialization
+  // Firebase Auth Initialization
   useEffect(() => {
     const initAuth = async () => {
       try {
@@ -224,11 +202,10 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Room Storage & Sync Listener
+  // Sync Room Data and FX
   useEffect(() => {
     if (!roomId) return;
 
-    // Check Ban Status
     const currentRoomBans = bannedList[roomId] || [];
     if (currentRoomBans.includes(userName) && !isAdmin) {
       setIsBanned(true);
@@ -236,31 +213,22 @@ export default function App() {
       return;
     }
 
-    const loadRoomMessages = () => {
-      const roomMsgsKey = `hub_msg_sync_${roomId}`;
-      const savedMsgs = localStorage.getItem(roomMsgsKey);
-      if (savedMsgs) {
-        setMessages(JSON.parse(savedMsgs));
-      } else {
-        setMessages([]);
-      }
-    };
+    const roomMsgsKey = `hub_msg_sync_${roomId}`;
+    const savedMsgs = localStorage.getItem(roomMsgsKey);
+    setMessages(savedMsgs ? JSON.parse(savedMsgs) : []);
 
-    loadRoomMessages();
-
-    // Load Reports
     const savedReports = localStorage.getItem(`hub_reports_sync_${roomId}`);
     if (savedReports) setReportsList(JSON.parse(savedReports));
 
     const handleStorageEvent = (e) => {
-      if (e.key === `hub_msg_sync_${roomId}`) {
-        if (e.newValue) setMessages(JSON.parse(e.newValue));
+      if (e.key === `hub_msg_sync_${roomId}` && e.newValue) {
+        setMessages(JSON.parse(e.newValue));
       }
-      if (e.key === `hub_requests_sync_${roomId}`) {
-        if (e.newValue) setJoinRequests(JSON.parse(e.newValue));
+      if (e.key === `hub_requests_sync_${roomId}` && e.newValue) {
+        setJoinRequests(JSON.parse(e.newValue));
       }
-      if (e.key === `hub_reports_sync_${roomId}`) {
-        if (e.newValue) setReportsList(JSON.parse(e.newValue));
+      if (e.key === `hub_reports_sync_${roomId}` && e.newValue) {
+        setReportsList(JSON.parse(e.newValue));
       }
       if (e.key === `hub_bans_sync_${roomId}`) {
         const updatedBans = e.newValue ? JSON.parse(e.newValue) : [];
@@ -269,8 +237,8 @@ export default function App() {
           setInRoom(false);
         }
       }
-      if (e.key === `hub_styles_sync`) {
-        if (e.newValue) setRoomStyles(JSON.parse(e.newValue));
+      if (e.key === `hub_styles_sync` && e.newValue) {
+        setRoomStyles(JSON.parse(e.newValue));
       }
       if (e.key === `hub_approval_user_${userName}_${roomId}`) {
         if (e.newValue === 'approved') {
@@ -285,17 +253,13 @@ export default function App() {
           alert(`❌ Creator denied your request to enter #${roomId}.`);
         }
       }
-      if (e.key === `hub_disco_sync_${roomId}`) {
-        if (e.newValue === 'true') {
-          setActiveDiscoMode(true);
-          setTimeout(() => setActiveDiscoMode(false), 8000);
-        }
+      if (e.key === `hub_disco_sync_${roomId}` && e.newValue === 'true') {
+        setActiveDiscoMode(true);
+        setTimeout(() => setActiveDiscoMode(false), 8000);
       }
-      if (e.key === `hub_matrix_sync_${roomId}`) {
-        if (e.newValue === 'true') {
-          setActiveMatrixMode(true);
-          setTimeout(() => setActiveMatrixMode(false), 9000);
-        }
+      if (e.key === `hub_matrix_sync_${roomId}` && e.newValue === 'true') {
+        setActiveMatrixMode(true);
+        setTimeout(() => setActiveMatrixMode(false), 9000);
       }
     };
 
@@ -306,7 +270,7 @@ export default function App() {
     return () => window.removeEventListener('storage', handleStorageEvent);
   }, [roomId, userName, sideRooms, bannedList, isAdmin]);
 
-  // Active Rank Heartbeat Timer
+  // Rank Heartbeat
   useEffect(() => {
     if (!inRoom) return;
     const timer = setInterval(() => {
@@ -319,15 +283,13 @@ export default function App() {
     return () => clearInterval(timer);
   }, [inRoom]);
 
-  // Scroll Chat Feed
+  // Scroll Chat
   useEffect(() => {
-    if (inRoom) {
-      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
+    if (inRoom) chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, inRoom]);
 
-  // Password Authentication & Account Vault Handler
-  const handleSignIn = (e) => {
+  // Global Cross-Device Firebase Firestore Authentication
+  const handleSignIn = async (e) => {
     e.preventDefault();
     setNameError('');
 
@@ -342,27 +304,47 @@ export default function App() {
       return;
     }
 
-    // Admin Verification
+    // Admin Account Verification
     if (cleanName === 'LEO_') {
       if (userPassword !== 'password') {
         setNameError('Incorrect admin password for LEO_.');
         return;
       }
       setIsAdmin(true);
+      setUserGradient('from-amber-400 to-orange-600');
       localStorage.setItem('hub_isadmin', 'true');
     } else {
-      let currentVault = { ...userVault };
-      if (currentVault[cleanName]) {
-        if (currentVault[cleanName] !== userPassword) {
-          setNameError('Incorrect account password for this username!');
-          return;
-        }
-      } else {
-        currentVault[cleanName] = userPassword;
-        setUserVault(currentVault);
-      }
       setIsAdmin(false);
       localStorage.setItem('hub_isadmin', 'false');
+
+      try {
+        // Query Global Firebase Firestore Accounts
+        const userDocRef = doc(db, 'users', cleanName.toLowerCase());
+        const userSnap = await getDoc(userDocRef);
+
+        if (userSnap.exists()) {
+          const userData = userSnap.data();
+          if (userData.password !== userPassword) {
+            setNameError('Incorrect password for this username on Cyberhub!');
+            return;
+          }
+          if (userData.gradient) setUserGradient(userData.gradient);
+          if (userData.activeSeconds) setActiveSeconds(userData.activeSeconds);
+        } else {
+          // Register New Global Account in Firestore
+          const randomGrad = ALL_COLOR_GRADIENTS[Math.floor(Math.random() * ALL_COLOR_GRADIENTS.length)];
+          setUserGradient(randomGrad);
+          await setDoc(userDocRef, {
+            username: cleanName,
+            password: userPassword,
+            gradient: randomGrad,
+            activeSeconds: activeSeconds,
+            createdAt: Date.now()
+          });
+        }
+      } catch (err) {
+        console.warn("Firestore Auth Fallback Mode Active:", err);
+      }
     }
 
     localStorage.setItem('hub_username', cleanName);
@@ -451,14 +433,11 @@ export default function App() {
     }
   };
 
-  // Submit User Report (Includes Image URL & Reason)
   const handleFileScreenshot = (e) => {
     const file = e.target.files[0];
     if (file) {
       const reader = new FileReader();
-      reader.onloadend = () => {
-        setReportScreenshotUrl(reader.result);
-      };
+      reader.onloadend = () => setReportScreenshotUrl(reader.result);
       reader.readAsDataURL(file);
     }
   };
@@ -482,14 +461,13 @@ export default function App() {
     localStorage.setItem(`hub_reports_sync_${roomId}`, JSON.stringify(updated));
     window.dispatchEvent(new Event('storage'));
 
-    alert(`✅ Report filed against @${reportTargetUser}. Sent to room owner & admin for review.`);
+    alert(`✅ Report filed against @${reportTargetUser}. Sent to room owner & admin.`);
     setShowReportModal(false);
     setReportTargetUser('');
     setReportReason('');
     setReportScreenshotUrl('');
   };
 
-  // Ban User System Handler
   const handleBanUserSubmit = (e) => {
     e.preventDefault();
     const target = banUserInput.trim();
@@ -520,7 +498,6 @@ export default function App() {
     setShowBanModal(false);
   };
 
-  // Change Room Style (Color or Image Background)
   const handleUpdateRoomStyle = (backgroundValue, isCustomImage = false) => {
     const updatedStyles = {
       ...roomStyles,
@@ -534,7 +511,6 @@ export default function App() {
     setShowRoomStyleModal(false);
   };
 
-  // Creator Approvals
   const handleApproveUser = (targetUser) => {
     const updatedReqs = joinRequests.filter(r => r.user !== targetUser);
     setJoinRequests(updatedReqs);
@@ -562,7 +538,6 @@ export default function App() {
     window.dispatchEvent(new Event('storage'));
   };
 
-  // Upgraded Disco FX
   const triggerDiscoBall = () => {
     if (!isAdmin) return;
     setActiveDiscoMode(true);
@@ -574,7 +549,6 @@ export default function App() {
     }, 8000);
   };
 
-  // Upgraded Matrix FX
   const triggerMatrixRain = () => {
     if (!isAdmin) return;
     setActiveMatrixMode(true);
@@ -586,7 +560,6 @@ export default function App() {
     }, 9000);
   };
 
-  // Actions
   const handleAction = (actionType, targetUser, emoji) => {
     const actionMsg = {
       id: Date.now(),
@@ -601,7 +574,6 @@ export default function App() {
     window.dispatchEvent(new Event('storage'));
   };
 
-  // Send Message
   const handleSendMessage = (e) => {
     e.preventDefault();
     if ((!inputMessage.trim() && !mediaUrlInput.trim()) || !roomId) return;
@@ -638,7 +610,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-mono overflow-hidden relative">
 
-      {/* DISCO BALL OVERLAY */}
+      {/* DISCO OVERLAY */}
       {activeDiscoMode && (
         <div className="fixed inset-0 z-50 pointer-events-none flex flex-col items-center justify-start bg-black/50 backdrop-blur-sm overflow-hidden">
           <div className="absolute inset-0 bg-gradient-to-r from-pink-500/30 via-cyan-500/30 to-amber-500/30 animate-pulse" />
@@ -655,7 +627,7 @@ export default function App() {
         </div>
       )}
 
-      {/* MATRIX CODE RAIN OVERLAY */}
+      {/* MATRIX RAIN OVERLAY */}
       {activeMatrixMode && (
         <div className="fixed inset-0 z-50 pointer-events-none bg-black/95 flex flex-col items-center justify-center p-6 text-center overflow-hidden">
           <div className="absolute inset-0 opacity-60 font-mono text-emerald-400 text-xs leading-none overflow-hidden select-none whitespace-pre">
@@ -888,7 +860,7 @@ export default function App() {
         </div>
       )}
 
-      {/* LOGIN & PASSWORD VERIFICATION SCREEN */}
+      {/* LOGIN SCREEN */}
       {!isProfileSet || (!inRoom && !isWaitingForApproval && !isBanned) ? (
         <div className="flex-1 flex flex-col items-center justify-center p-4 bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-950">
           <div className="w-full max-w-md bg-slate-900/90 border border-slate-800 p-8 rounded-3xl shadow-2xl backdrop-blur-xl">
@@ -897,7 +869,7 @@ export default function App() {
               <h1 className="text-3xl font-black bg-gradient-to-r from-cyan-400 to-pink-400 bg-clip-text text-transparent">
                 CYBERHUB
               </h1>
-              <p className="text-xs text-slate-400 mt-1">Sign in with password & join isolated cyber rooms</p>
+              <p className="text-xs text-slate-400 mt-1">Global Cross-Device Authentication Sync</p>
             </div>
 
             <form onSubmit={handleSignIn} className="space-y-4">
@@ -945,13 +917,13 @@ export default function App() {
                 type="submit"
                 className="w-full py-3.5 bg-gradient-to-r from-cyan-500 to-indigo-600 text-white font-extrabold rounded-xl shadow-lg flex items-center justify-center gap-2"
               >
-                <LogIn className="w-5 h-5" /> Authenticate & Enter Hub
+                <LogIn className="w-5 h-5" /> Authenticate & Sync Profile
               </button>
             </form>
           </div>
         </div>
       ) : (
-        /* MAIN CHAT APPLICATION DASHBOARD */
+        /* MAIN CHAT DASHBOARD */
         <div className="flex-1 flex flex-col h-screen">
           <header className="h-16 bg-slate-900 border-b border-slate-800 px-4 flex items-center justify-between shrink-0">
             <div className="flex items-center gap-3">
@@ -1099,7 +1071,7 @@ export default function App() {
               )}
             </aside>
 
-            {/* MAIN MESSAGES FEED WITH DYNAMIC BACKDROP */}
+            {/* MAIN MESSAGES FEED */}
             <main 
               className={`flex-1 flex flex-col p-4 overflow-hidden relative transition-all ${
                 currentStyle.type === 'color' ? currentStyle.value : ''
